@@ -31,5 +31,11 @@ ArduinoHandler(QThread)
 └── Internal:
     └── _parse_data(raw: str) → dict
 
+    Key Logic: 
+    - read lines from serial continuously
+    - parse space-separated values: "P1 P2 FLOW HR"
+    - add timestamp
+    - emit signal with dict
+    - handle malformed data gracefully (log, skip)
 
 """
