@@ -36,4 +36,26 @@ BaslerCamera(QThread)
 └── Internal:
     └── _configure_camera()      # Set camera parameters
 
+    
+from pypylon import pylon
+
+# Connect
+tl_factory = pylon.TlFactory.GetInstance()
+camera = pylon.InstantCamera(tl_factory.CreateFirstDevice())
+camera.Open()
+
+# Configure
+camera.ExposureTime.SetValue(1000)  # 1ms
+camera.AcquisitionFrameRateEnable.SetValue(True)
+camera.AcquisitionFrameRate.SetValue(60)
+
+# Grab loop
+camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+while running:
+    grab_result = camera.RetrieveResult(5000)
+    if grab_result.GrabSucceeded():
+        frame = grab_result.Array  # numpy array, grayscale
+        emit signal
+    grab_result.Release()
+
 """
