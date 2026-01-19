@@ -46,4 +46,29 @@ DataLogger(QThread)
     ├── _write_csv_header()
     ├── _write_csv_row(data: dict)
     └── _save_frame(frame: ndarray, index: int)
+
+    **New Feature:** Log control commands to CSV
+```python
+class DataLogger(QThread):
+    # ... existing code ...
+    
+    def log_data(self, sensor: dict, tracking: dict, frame, control_cmd: str = None):
+       
+        # Enhanced to log control commands
+        
+        # CSV columns:
+        # timestamp, elapsed, p1, p2, flow, hr, dot0_x, dot0_y, ..., control_command
+        
+        row = [
+            sensor['timestamp'],
+            sensor['elapsed'],
+            sensor['p1'],
+            sensor['p2'],
+            sensor['flow_rate'],
+            sensor['heart_rate'],
+            # ... dot positions ...
+            control_cmd if control_cmd else ""  # NEW: log command if present
+        ]
+        self._queue.put(row)
+```
 """

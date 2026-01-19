@@ -2,34 +2,45 @@
 Docstring for state_manager
 **Purpose:** Central hub for application state and signal distribution
 
-**Class Structure:**
-```
-StateManager(QObject)
-│
-├── Signals:
-│   ├── sensor_updated(dict)         # New sensor data
-│   ├── frame_updated(dict)          # New camera frame
-│   ├── tracking_updated(dict)       # New dot positions
-│   ├── connection_changed(str, bool)  # Device connection status
-│   ├── recording_changed(bool)      # Recording started/stopped
-│   └── error_occurred(str, str)     # Source, message
-│
-├── Attributes:
-│   ├── arduino_connected: bool
-│   ├── camera_connected: bool
-│   ├── recording: bool
-│   ├── current_sensor_data: dict
-│   ├── current_tracking_data: dict
-│   └── config: Config
-│
-├── Methods:
-│   ├── update_sensor_data(data: dict)
-│   ├── update_frame(frame_data: dict)
-│   ├── update_tracking(tracking_data: dict)
-│   ├── set_connection(device: str, connected: bool)
-│   ├── set_recording(recording: bool)
-│   ├── get_sensor_data() → dict
-│   └── get_tracking_data() → dict
+
+(ENHANCED)
+
+**New State Tracking:**
+```python
+class StateManager(QObject):
+    # Existing signals
+    sensor_updated = Signal(dict)
+    frame_updated = Signal(dict)
+    tracking_updated = Signal(dict)
+    connection_changed = Signal(str, bool)
+    recording_changed = Signal(bool)
+    error_occurred = Signal(str, str)
+    
+    # NEW signals for control
+    control_command_sent = Signal(str)
+    hardware_state_changed = Signal(dict)
+    
+    def __init__(self):
+        super().__init__()
+        # Existing state
+        self.arduino_connected = False
+        self.camera_connected = False
+        self.recording = False
+        self.current_sensor_data = {}
+        self.current_tracking_data = {}
+        
+        # NEW: Hardware control state
+        self.current_hardware_state = {
+            "fan": False,
+            "solenoid": False,
+            "bpm": 0,
+            "mode": "POT"
+        }
+        
+    def update_hardware_state(self, state: dict):
+        # Update and emit hardware state changes
+        self.current_hardware_state.update(state)
+        self.hardware_state_changed.emit(state)
 ```
 
 """
