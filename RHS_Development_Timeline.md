@@ -27,13 +27,13 @@
 ### Tasks
 
 #### January 12-13: Environment Setup
-- [ ] Install Python 3.11
+- [x] Install Python 3.11
 - [ ] Install Basler Pylon SDK (download from baslerweb.com)
 - [ ] Test pypylon installation: `pip install pypylon`
 - [ ] Run pypylon sample script to verify camera SDK works
-- [ ] Install remaining packages: `pip install PyQt6 pyqtgraph opencv-python pyserial numpy pandas`
-- [ ] Create GitHub repository
-- [ ] Create directory structure per architecture document
+- [x] Install remaining packages: `pip install PyQt6 pyqtgraph opencv-python pyserial numpy pandas`
+- [x] Create GitHub repository
+- [x] Create directory structure per architecture document
 
 #### January 14: MapAnything Setup
 - [ ] Clone MapAnything repo: `git clone https://github.com/facebookresearch/map-anything.git`
@@ -50,11 +50,11 @@
 - [ ] Note baud rate (31250) and any parsing requirements
 
 ### Deliverables
-- [ ] Working development environment on your machine
+- [x] Working development environment on your machine
 - [ ] pypylon successfully captures test frames (or ready for when camera arrives)
 - [ ] MapAnything runs successfully on sample images
 - [ ] Serial communication with Arduino verified
-- [ ] GitHub repo created with initial structure
+- [x] GitHub repo created with initial structure
 
 ### Notes
 ```
@@ -77,7 +77,7 @@ If camera hasn't arrived yet, you can still:
 ### Tasks
 
 #### January 16-17: Project Structure
-- [ ] Create all directories:
+- [x] Create all directories:
   ```
   src/
   src/core/
@@ -89,8 +89,8 @@ If camera hasn't arrived yet, you can still:
   docs/
   arduino/
   ```
-- [ ] Create all `__init__.py` files
-- [ ] Write `requirements.txt`:
+- [x] Create all `__init__.py` files
+- [x] Write `requirements.txt`:
   ```
   PyQt6>=6.4.0
   pyqtgraph>=0.13.0
@@ -100,7 +100,7 @@ If camera hasn't arrived yet, you can still:
   numpy>=1.24.0
   pandas>=2.0.0
   ```
-- [ ] Write `src/utils/constants.py` with all application constants
+- [x] Write `src/utils/constants.py` with all application constants
 - [ ] Write `src/utils/config.py` with Config class (load/save JSON)
 
 #### January 18-19: Mock Data Generators
@@ -131,8 +131,8 @@ If camera hasn't arrived yet, you can still:
 - [ ] If possible, test on both macOS and Windows
 
 ### Deliverables
-- [ ] Complete directory structure in GitHub (including `arduino/` folder)
-- [ ] `constants.py` with all app constants defined
+- [x] Complete directory structure in GitHub (including `arduino/` folder)
+- [x] `constants.py` with all app constants defined
 - [ ] `config.py` that saves/loads settings to JSON file
 - [ ] `mock_arduino.py` generates fake sensor data (and echoes commands)
 - [ ] `mock_camera.py` generates fake frames with dots
