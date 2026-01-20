@@ -52,6 +52,9 @@ dist/
 # Jupyter Notebooks (if you use them)
 .ipynb_checkpoints/
 
+# Project instructions (internal use only)
+PROJECT_INSTRUCTIONS.md
+
 # IMPORTANT: Timeline files ARE tracked
 # RHS_Development_Timeline.md is the CURRENT 10-week timeline
 # RHS_Development_Timeline_BACKUP.md is the original 8-week plan (reference)
