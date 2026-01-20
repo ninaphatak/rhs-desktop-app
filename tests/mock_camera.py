@@ -1,12 +1,13 @@
 """
-Mock Basler Camera - Simulates camera frames with moving colored dots
+Mock Basler Camera - Simulates camera frames with dots in circular pattern
 
 Purpose: Provides synthetic camera frames for testing dot tracking without hardware
 
 Features:
 - Generates 1920x1200 grayscale frames at 60 FPS
-- Simulates 3-5 colored dots moving in realistic patterns
-- Dots move with physics (velocity, acceleration, bounce off walls)
+- Simulates 3-8 colored dots arranged in a circular pattern
+- Dots randomly displace from rest positions (realistic organ motion)
+- Displacement is measurable for motion tracking validation
 - Matches BaslerCamera interface exactly
 - Thread-safe frame emission
 
@@ -25,21 +26,26 @@ import math
 
 
 class Dot:
-    """Represents a moving colored dot with physics"""
+    """Represents a dot with circular arrangement and random displacement"""
 
-    def __init__(self, width, height):
-        self.width = width
-        self.height = height
+    def __init__(self, rest_x, rest_y):
+        # Rest position (where dot returns to)
+        self.rest_x = rest_x
+        self.rest_y = rest_y
 
-        # Position (center of frame initially)
-        self.x = random.uniform(width * 0.3, width * 0.7)
-        self.y = random.uniform(height * 0.3, height * 0.7)
+        # Current position (starts at rest)
+        self.x = rest_x
+        self.y = rest_y
 
-        # Velocity (pixels per second)
-        angle = random.uniform(0, 2 * math.pi)
-        speed = random.uniform(50, 200)  # pixels/sec
-        self.vx = speed * math.cos(angle)
-        self.vy = speed * math.sin(angle)
+        # Displacement parameters
+        self.max_displacement = random.uniform(10, 40)  # Maximum displacement in pixels
+        self.displacement_freq = random.uniform(0.5, 2.0)  # Hz (breathing/pulsation rate)
+        self.phase_offset = random.uniform(0, 2 * math.pi)  # Random phase for each dot
+
+        # Random walk parameters (simulates small random motion)
+        self.random_walk_x = 0
+        self.random_walk_y = 0
+        self.random_walk_speed = 5  # pixels/sec
 
         # Size (radius in pixels)
         self.radius = random.randint(8, 20)
@@ -50,32 +56,40 @@ class Dot:
         # Color identifier (for tracking)
         self.color_id = random.randint(0, 2)  # 0=red, 1=green, 2=blue
 
-    def update(self, dt):
-        """Update position with simple physics"""
-        # Update position
-        self.x += self.vx * dt
-        self.y += self.vy * dt
+    def update(self, dt, time_elapsed):
+        """Update position with displacement from rest position"""
+        # Periodic displacement (simulates rhythmic motion like breathing/pulsation)
+        phase = 2 * math.pi * self.displacement_freq * time_elapsed + self.phase_offset
+        displacement_magnitude = self.max_displacement * math.sin(phase)
 
-        # Bounce off walls with damping
-        damping = 0.9
-        if self.x < self.radius or self.x > self.width - self.radius:
-            self.vx *= -damping
-            self.x = max(self.radius, min(self.width - self.radius, self.x))
+        # Direction of displacement (varies per dot, can be radial or tangential)
+        displacement_angle = self.phase_offset  # Use phase offset as displacement direction
+        displacement_x = displacement_magnitude * math.cos(displacement_angle)
+        displacement_y = displacement_magnitude * math.sin(displacement_angle)
 
-        if self.y < self.radius or self.y > self.height - self.radius:
-            self.vy *= -damping
-            self.y = max(self.radius, min(self.height - self.radius, self.y))
+        # Update random walk (small random jitter)
+        self.random_walk_x += random.uniform(-self.random_walk_speed, self.random_walk_speed) * dt
+        self.random_walk_y += random.uniform(-self.random_walk_speed, self.random_walk_speed) * dt
 
-        # Add small random acceleration (simulates realistic motion)
-        self.vx += random.uniform(-20, 20) * dt
-        self.vy += random.uniform(-20, 20) * dt
+        # Limit random walk to prevent drift
+        max_walk = 15  # pixels
+        self.random_walk_x = max(-max_walk, min(max_walk, self.random_walk_x))
+        self.random_walk_y = max(-max_walk, min(max_walk, self.random_walk_y))
 
-        # Limit max speed
-        max_speed = 300
-        speed = math.sqrt(self.vx**2 + self.vy**2)
-        if speed > max_speed:
-            self.vx = (self.vx / speed) * max_speed
-            self.vy = (self.vy / speed) * max_speed
+        # Apply damping to random walk (returns to zero)
+        damping = 0.95
+        self.random_walk_x *= damping
+        self.random_walk_y *= damping
+
+        # Calculate final position
+        self.x = self.rest_x + displacement_x + self.random_walk_x
+        self.y = self.rest_y + displacement_y + self.random_walk_y
+
+    def get_displacement(self):
+        """Calculate current displacement magnitude from rest position"""
+        dx = self.x - self.rest_x
+        dy = self.y - self.rest_y
+        return math.sqrt(dx**2 + dy**2)
 
     def draw(self, frame):
         """Draw dot on frame with anti-aliasing"""
@@ -118,14 +132,16 @@ class MockCamera(QThread):
 
         # Frame tracking
         self._frame_count = 0
+        self._start_time = None
+        self._time_elapsed = 0
 
         # FPS measurement
         self._fps_samples = []
         self._last_fps_update = time.time()
 
-        # Dots
-        self._num_dots = random.randint(3, 5)
-        self._dots = [Dot(self.WIDTH, self.HEIGHT) for _ in range(self._num_dots)]
+        # Dots arranged in circular pattern
+        self._num_dots = random.randint(5, 8)
+        self._dots = self._create_circular_dots()
 
     @staticmethod
     def list_cameras():
@@ -161,6 +177,7 @@ class MockCamera(QThread):
         """Main thread loop - generate and emit frames"""
         self._running = True
         self.connection_changed.emit(True)
+        self._start_time = time.time()
 
         last_frame_time = time.time()
         last_update_time = time.time()
@@ -169,6 +186,7 @@ class MockCamera(QThread):
             current_time = time.time()
             dt = current_time - last_update_time
             last_update_time = current_time
+            self._time_elapsed = current_time - self._start_time
 
             # Generate frame at target rate
             if current_time - last_frame_time >= self._frame_interval:
@@ -189,8 +207,24 @@ class MockCamera(QThread):
         self._running = False
         self.wait()
 
+    def _create_circular_dots(self):
+        """Create dots arranged in a circular pattern"""
+        dots = []
+        center_x = self.WIDTH / 2
+        center_y = self.HEIGHT / 2
+        radius = min(self.WIDTH, self.HEIGHT) * 0.3  # Circle radius (30% of smaller dimension)
+
+        # Arrange dots evenly around circle
+        for i in range(self._num_dots):
+            angle = (2 * math.pi * i) / self._num_dots
+            rest_x = center_x + radius * math.cos(angle)
+            rest_y = center_y + radius * math.sin(angle)
+            dots.append(Dot(rest_x, rest_y))
+
+        return dots
+
     def _generate_frame(self, dt) -> dict:
-        """Generate synthetic frame with moving dots"""
+        """Generate synthetic frame with displacing dots"""
         # Create blank grayscale frame (dark background)
         frame = np.full((self.HEIGHT, self.WIDTH), 20, dtype=np.uint8)
 
@@ -199,9 +233,11 @@ class MockCamera(QThread):
         frame = np.clip(frame.astype(np.int16) + noise, 0, 255).astype(np.uint8)
 
         # Update and draw dots
+        displacements = []
         for dot in self._dots:
-            dot.update(dt)
+            dot.update(dt, self._time_elapsed)
             dot.draw(frame)
+            displacements.append(dot.get_displacement())
 
         # Simulate exposure effect (brighter = more exposure)
         exposure_factor = self._exposure_us / 1000.0  # Normalize
@@ -212,7 +248,8 @@ class MockCamera(QThread):
         return {
             "timestamp": time.time(),
             "frame": frame,
-            "frame_number": self._frame_count
+            "frame_number": self._frame_count,
+            "displacements": displacements  # Include displacement data for validation
         }
 
     def _update_fps_measurement(self, frame_time):
