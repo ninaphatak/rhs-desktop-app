@@ -28,7 +28,7 @@
 
 #### January 12-13: Environment Setup
 - [x] Install Python 3.11
-- [ ] Install Basler Pylon SDK (download from baslerweb.com)
+- [x] Install Basler Pylon SDK (download from baslerweb.com)
 - [ ] Test pypylon installation: `pip install pypylon`
 - [ ] Run pypylon sample script to verify camera SDK works
 - [x] Install remaining packages: `pip install PyQt6 pyqtgraph opencv-python pyserial numpy pandas`
