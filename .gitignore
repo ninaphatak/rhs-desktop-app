@@ -42,6 +42,9 @@ settings.json
 tmp/
 temp/
 
+# Claude Code session files
+.claude/
+
 # Build artifacts
 build/
 dist/
