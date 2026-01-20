@@ -12,7 +12,7 @@ A desktop application for real-time monitoring and control of the Right Heart Si
 - CSV data logging with timestamps
 - 3D reconstruction export for MapAnything
 
-### Control (NEW)
+### Control 
 - **Hardware Control:** Fan, solenoid valve, BPM setpoint
 - **Three Control Modes:**
   - POT: Potentiometer control (fallback)
