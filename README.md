@@ -41,7 +41,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-> **Note:** Basler camera features require the [Pylon SDK](https://www.baslerweb.com/en/downloads/software-downloads/). We used Pylon 25.11.
+> **Note:** Basler camera features require the [Pylon SDK](https://www.baslerweb.com/en/downloads/software-downloads/). We used Pylon 25.11
 
 ## Development Setup
 
