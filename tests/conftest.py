@@ -36,25 +36,25 @@ def sample_frame_small() -> np.ndarray:
 def sample_frame_with_dots() -> np.ndarray:
     """
     Generate a test frame with 4 black dots in asymmetric pattern.
-    
+
     Dot positions (in 1920x1200 frame):
         - Marker 0: (960, 360)  - top center
         - Marker 1: (672, 720)  - bottom left
-        - Marker 2: (1248, 720) - bottom right  
+        - Marker 2: (1248, 720) - bottom right
         - Marker 3: (960, 900)  - bottom center
     """
     frame = np.ones((1200, 1920), dtype=np.uint8) * 255
-    
+
     dots = [
         (960, 360),   # Top center
         (672, 720),   # Bottom left
         (1248, 720),  # Bottom right
         (960, 900),   # Bottom center
     ]
-    
+
     for x, y in dots:
         cv2.circle(frame, (x, y), 15, 0, -1)
-    
+
     return frame
 
 
@@ -62,17 +62,17 @@ def sample_frame_with_dots() -> np.ndarray:
 def sample_frame_with_dots_small() -> np.ndarray:
     """Generate a smaller test frame with 4 black dots for faster tests."""
     frame = np.ones((480, 640), dtype=np.uint8) * 255
-    
+
     dots = [
         (320, 120),  # Top center
         (224, 288),  # Bottom left
         (416, 288),  # Bottom right
         (320, 360),  # Bottom center
     ]
-    
+
     for x, y in dots:
         cv2.circle(frame, (x, y), 10, 0, -1)
-    
+
     return frame
 
 
@@ -137,7 +137,7 @@ def mock_sensor_data_sequence() -> list[dict]:
     """Provide a sequence of sensor data for testing time series."""
     import time
     base_time = time.time()
-    
+
     return [
         {"timestamp": base_time + i * 0.033, "p1": 8.0 + i * 0.1, "p2": 25.0, "flow_rate": 1.45, "heart_rate": 72}
         for i in range(30)  # ~1 second at 30Hz

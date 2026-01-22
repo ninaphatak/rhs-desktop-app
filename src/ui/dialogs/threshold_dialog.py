@@ -2,7 +2,7 @@
 Docstring for threshold_dialog
 Purpose: Tune dot detection parameters with live preview
 
-Features: 
+Features:
 - live camera feed
 - threshold slider (0-255)
 - min/max area sliders

@@ -18,11 +18,12 @@ Usage:
     mock_camera.set_exposure(1000)
 """
 
+import math
+import random
 import time
+
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
-import random
-import math
 
 
 class Dot:
@@ -270,9 +271,10 @@ class MockCamera(QThread):
 # Convenience function for testing
 def test_mock_camera():
     """Test the mock camera generator"""
-    from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow
-    from PyQt6.QtGui import QImage, QPixmap
     import sys
+
+    from PyQt6.QtGui import QImage, QPixmap
+    from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow
 
     app = QApplication(sys.argv)
 

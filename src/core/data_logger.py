@@ -51,14 +51,14 @@ DataLogger(QThread)
 ```python
 class DataLogger(QThread):
     # ... existing code ...
-    
+
     def log_data(self, sensor: dict, tracking: dict, frame, control_cmd: str = None):
-       
+
         # Enhanced to log control commands
-        
+
         # CSV columns:
         # timestamp, elapsed, p1, p2, flow, hr, dot0_x, dot0_y, ..., control_command
-        
+
         row = [
             sensor['timestamp'],
             sensor['elapsed'],

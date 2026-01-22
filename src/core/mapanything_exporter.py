@@ -30,9 +30,9 @@ MapAnythingExporter
 └── Internal:
     └── _create_metadata_json(session_path)
 
-    
 
-metadata.json format: 
+
+metadata.json format:
 {
     "camera": {
         "model": "Basler ace 2 a2A1920-160umBAS",

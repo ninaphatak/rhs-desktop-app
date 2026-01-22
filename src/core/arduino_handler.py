@@ -61,7 +61,7 @@ class ArduinoHandler(QThread):
     command_acknowledged = Signal(str, bool)  # command, success
     hardware_state_updated = Signal(dict)
     error_occurred = Signal(str)
-    
+
     def __init__(self):
         super().__init__()
         self._serial = None
@@ -70,49 +70,49 @@ class ArduinoHandler(QThread):
         self._pending_command = None
         self._command_timeout = 1.0
         self._last_command_time = 0
-        
+
     def send_command(self, cmd: str):
         # Thread-safe command queueing
         self._command_queue.put(cmd)
-        
+
     def set_fan(self, state: bool):
         # High-level fan control
         self.send_command(f"SET_FAN {1 if state else 0}")
-        
+
     def set_bpm(self, value: int):
         # High-level BPM control (AUTO mode)
         if 60 <= value <= 180:
             self.send_command(f"SET_BPM {value}")
         else:
             self.error_occurred.emit("BPM out of range (60-180)")
-            
+
     def set_mode(self, mode: str):
         # High-level mode control
         if mode in ["POT", "AUTO", "MANUAL"]:
             self.send_command(f"SET_MODE {mode}")
         else:
             self.error_occurred.emit(f"Invalid mode: {mode}")
-            
+
     def emergency_stop(self):
         Emergency: kill all outputs immediately
         # Clear queue and send immediately
         while not self._command_queue.empty():
             self._command_queue.get()
         self.send_command("EMERGENCY_STOP")
-        
+
     def run(self):
         # Main thread loop - read data AND process command queue
         self._running = True
-        
+
         while self._running:
             try:
                 # 1. Process outgoing commands
                 self._process_command_queue()
-                
+
                 # 2. Read incoming data
                 if self._serial and self._serial.in_waiting > 0:
                     line = self._serial.readline().decode('utf-8').strip()
-                    
+
                     # Check if it's a response or sensor data
                     if line.startswith(("OK", "ERROR", "STATUS")):
                         self._handle_response(line)
@@ -121,12 +121,12 @@ class ArduinoHandler(QThread):
                         data = self._parse_data(line)
                         if data:
                             self.data_received.emit(data)
-                            
+
             except Exception as e:
                 self.error_occurred.emit(str(e))
-                
+
         self.disconnect()
-        
+
     def _process_command_queue(self):
         Send queued commands to Arduino
         if self._pending_command:
@@ -134,7 +134,7 @@ class ArduinoHandler(QThread):
             if time.time() - self._last_command_time > self._command_timeout:
                 self.command_acknowledged.emit(self._pending_command, False)
                 self._pending_command = None
-                
+
         # Send next command if no pending ACK
         if not self._pending_command and not self._command_queue.empty():
             cmd = self._command_queue.get()
@@ -142,24 +142,24 @@ class ArduinoHandler(QThread):
             self._pending_command = cmd
             self._last_command_time = time.time()
             self.command_sent.emit(cmd)
-            
+
     def _handle_response(self, line: str):
         # Parse Arduino response
         if line.startswith("OK"):
             self.command_acknowledged.emit(self._pending_command, True)
             self._pending_command = None
-            
+
         elif line.startswith("ERROR"):
             error_msg = line.split(" ", 1)[1] if " " in line else "Unknown error"
             self.command_acknowledged.emit(self._pending_command, False)
             self.error_occurred.emit(f"Arduino error: {error_msg}")
             self._pending_command = None
-            
+
         elif line.startswith("STATUS"):
             # Parse: STATUS FAN:1 SOL:0 BPM:72 MODE:AUTO
             state = self._parse_status(line)
             self.hardware_state_updated.emit(state)
-            
+
     def _parse_status(self, line: str) -> dict:
         # Parse STATUS response into dict
         parts = line.split()[1:]  # Skip "STATUS"

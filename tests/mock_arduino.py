@@ -19,11 +19,12 @@ Usage:
     mock_arduino.send_command("SET_FAN 1")
 """
 
-import time
 import math
-from queue import Queue
-from PyQt6.QtCore import QThread, pyqtSignal
 import random
+import time
+from queue import Queue
+
+from PyQt6.QtCore import QThread, pyqtSignal
 
 
 class MockArduino(QThread):
@@ -278,10 +279,11 @@ class MockArduino(QThread):
 # Convenience function for testing
 def test_mock_arduino():
     """Test the mock Arduino generator"""
-    from PyQt6.QtWidgets import QApplication
     import sys
 
-    app = QApplication(sys.argv)
+    from PyQt6.QtWidgets import QApplication
+
+    QApplication(sys.argv)
 
     mock = MockArduino()
 

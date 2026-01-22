@@ -2,7 +2,7 @@
 Docstring for rhs-desktop-app.src.core.basler_camera
 
 Purpose: Capture frames from Basler Camera using pypylon
-Input: 
+Input:
 - camera index (default 0)
 - target FPS (default 60 FPS)
 - exposure time in microseconds (default 1000 = 1ms)
@@ -36,7 +36,7 @@ BaslerCamera(QThread)
 └── Internal:
     └── _configure_camera()      # Set camera parameters
 
-    
+
 from pypylon import pylon
 
 # Connect

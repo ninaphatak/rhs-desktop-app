@@ -1,11 +1,11 @@
 """
 Purpose: Detect black dots on white valve using grayscale thresholding
-Input: 
+Input:
 - Frame (numpy array, grayscale)
 - threshold value (0-255, dots darker than this)
 - min/max dot area (filter noise and large blobs)
 
-Output: 
+Output:
 {
     "timestamp": float,
     "dots": [
@@ -41,7 +41,7 @@ DotTracker
     └── _assign_ids(dots) → dots with consistent IDs
 
 
-Key Logic: 
+Key Logic:
 
 import cv2
 import numpy as np
@@ -49,10 +49,10 @@ import numpy as np
 def detect(self, frame):
     # Threshold (black dots on white background)
     _, binary = cv2.threshold(frame, self.threshold, 255, cv2.THRESH_BINARY_INV)
-    
+
     # Find contours
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
+
     dots = []
     for contour in contours:
         area = cv2.contourArea(contour)
@@ -62,10 +62,10 @@ def detect(self, frame):
                 cx = int(M["m10"] / M["m00"])
                 cy = int(M["m01"] / M["m00"])
                 dots.append({"x": cx, "y": cy, "area": area})
-    
+
     # Assign consistent IDs based on position proximity to previous frame
     dots = self._assign_ids(dots)
-    
+
     return {"dots": dots, "dot_count": len(dots), ...}
 ```
 
