@@ -5,6 +5,8 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 *.egg
+htmlcov/
+*.egg-info/
 
 # Virtual Environment
 venv/
@@ -63,3 +65,5 @@ RHS_Code_Structure_v2.md
 # RHS_Development_Timeline_BACKUP.md is the original 8-week plan (reference)
 # RHS_Code_Structure.md documents the architecture
 CLAUDE.md
+.coverage
+
