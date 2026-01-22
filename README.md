@@ -8,9 +8,9 @@ A desktop application for real-time monitoring and control of the Right Heart Si
 
 ### Monitoring
 - Real-time sensor data visualization (pressure, flow rate, heart rate)
-- High-speed camera feed (60 fps) with dot tracking
+- High-speed camera feed (60 fps) with fiducial marker tracking
 - CSV data logging with timestamps
-- 3D reconstruction export for MapAnything
+- 3D displacement/strain analysis via MapAnything
 
 ### Control 
 - **Hardware Control:** Fan, solenoid valve, BPM setpoint
@@ -18,72 +18,81 @@ A desktop application for real-time monitoring and control of the Right Heart Si
   - POT: Potentiometer control (fallback)
   - AUTO: App-controlled BPM with auto-pulsing
   - MANUAL: Direct solenoid control
-- **Safety Features:** Emergency stop, command validation, mode constraints
-- **Bidirectional Communication:** Reliable command/acknowledgment protocol
+- **Safety Features:** Emergency stop, command validation, pressure monitoring
 
 ## Tech Stack
 
-- **Frontend:** PyQt6 + pyqtgraph
+- **GUI:** PyQt6 + pyqtgraph
 - **Camera:** Basler pypylon SDK
 - **Vision:** OpenCV
 - **Hardware:** Arduino (31250 baud serial)
-- **3D:** Meta MapAnything
+- **3D Reconstruction:** Meta MapAnything
 
 ## Quick Start
-
 ```bash
+# Clone repository
+git clone https://github.com/yourusername/rhs-desktop-app.git
+cd rhs-desktop-app
+
 # Install dependencies
 pip install -r requirements.txt
-
-# Install Basler Pylon SDK (camera)
-# Download from: https://www.baslerweb.com/
 
 # Run application
 python run.py
 ```
 
-## Documentation
+> **Note:** Basler camera features require the [Pylon SDK](https://www.baslerweb.com/en/downloads/software-downloads/). We used Pylon 25.11.
 
-- **[Development Timeline](RHS_Development_Timeline.md)** - 10-week implementation plan
-- **[Code Structure](RHS_Code_Structure.md)** - Architecture and component details
-- **[Project Instructions](PROJECT_INSTRUCTIONS.md)** - For AI assistance context
-- **[Arduino Protocol](docs/arduino_protocol.md)** - Command specification
-- **[Timeline Change Notice](TIMELINE_CHANGE_NOTICE.md)** - Why we expanded scope
+## Development Setup
 
-## Project Status
+1. Create conda environment:
+```bash
+   conda create -n rhs-desktop python=3.11
+   conda activate rhs-desktop
+```
 
-**Current Phase:** Week [X] of 10  
-**Hardware Status:** Camera [pending/arrived] | Arduino [connected/pending]
+2. Install development dependencies:
+```bash
+   pip install -r requirements-dev.txt
+```
 
-See [RHS_Development_Timeline.md](RHS_Development_Timeline.md) for detailed progress.
-
-## Safety
-
-⚠️ **EMERGENCY STOP:** Large red button in toolbar kills all outputs immediately.
-
-See [docs/safety_guide.md](docs/safety_guide.md) for complete safety procedures.
+3. Run tests:
+```bash
+   pytest
+```
 
 ## Architecture
-
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │ [Port ▼] [Connect] [Camera ▼] [Connect Cam] [🔴 E-STOP] [Record]   │
 ├──────────────────┬──────────────────┬───────────────────────────────┤
 │  SENSOR PANEL    │  CONTROL PANEL   │      CAMERA PANEL             │
-│  (Left, 25%)     │  (Middle, 25%)   │      (Right, 50%)             │
+│  (25%)           │  (25%)           │      (50%)                    │
 │                  │                  │                               │
 │  • P1/P2 graphs  │  • Mode selector │  • Live camera feed           │
 │  • Flow graph    │  • Fan control   │  • Dot overlay                │
 │  • HR display    │  • BPM slider    │  • Tracking data              │
-│                  │  • Solenoid ctl  │                               │
 └──────────────────┴──────────────────┴───────────────────────────────┘
 ```
 
+## Safety
+
+⚠️ **EMERGENCY STOP:** Red button in toolbar immediately stops all hardware outputs.
+
+The system includes:
+- Automatic pressure monitoring with low-pressure warnings
+- Command validation to prevent invalid inputs
+- Fallback to potentiometer control if app disconnects
+
+## Project Status
+
+🚧 **Under Development** - Senior Design Project (Winter/Spring 2025)
+
 ## Team
 
-UC Riverside Bioengineering Senior Design Team  
-January - March 2025
+UC Riverside Bioengineering Senior Design Team
 
 ## License
 
-[To be determined]
+[TBD]
+```
