@@ -1,7 +1,6 @@
 import sys
 import serial  # serial communication with arduino
 import serial.tools.list_ports
-import matplotlib.pyplot as plt #unused here (i think)
 import numpy as np #numeric arrays
 import time #used to measure elapsed time
 import csv #saving data into a csv file instead of a exe file which only runs on windows
