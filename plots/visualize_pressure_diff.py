@@ -95,8 +95,7 @@ def aggregate_by_time_interval(df, interval_seconds, agg_method='mean'):
     for interval in aggregated.index:
         if pd.notna(interval):
             left = int(interval.left)
-            right = int(interval.right)
-            labels.append(f"{left}-{right}s")
+            labels.append(str(left))
         else:
             labels.append("N/A")
 
@@ -107,7 +106,41 @@ def aggregate_by_time_interval(df, interval_seconds, agg_method='mean'):
 
     return aggregated, labels
 
-def create_diverging_bar_chart(aggregated_data, file_labels, interval, title=None, output_file=None):
+def _thin_labels(labels, max_labels=30):
+    """Thin out labels to avoid x-axis crowding.
+
+    Args:
+        labels: List of all labels
+        max_labels: Maximum number of labels to display
+
+    Returns:
+        Tuple of (tick_positions, tick_labels)
+    """
+    n_labels = len(labels)
+
+    if n_labels <= max_labels:
+        # Not crowded, show all labels
+        return np.arange(n_labels), labels
+
+    # Calculate step size to show approximately max_labels
+    step = max(1, n_labels // max_labels)
+
+    # Create thinned positions and labels
+    tick_positions = []
+    tick_labels = []
+
+    for i in range(0, n_labels, step):
+        tick_positions.append(i)
+        tick_labels.append(labels[i])
+
+    # Always include the last label if not already included
+    if tick_positions[-1] != n_labels - 1:
+        tick_positions.append(n_labels - 1)
+        tick_labels.append(labels[-1])
+
+    return tick_positions, tick_labels
+
+def create_diverging_bar_chart(aggregated_data, file_labels, interval, agg_method='mean', title=None, output_file=None):
     """Generate diverging bar chart visualization.
 
     Args:
@@ -139,17 +172,19 @@ def create_diverging_bar_chart(aggregated_data, file_labels, interval, title=Non
         ax.axhline(y=0, color='black', linewidth=2, linestyle='-', zorder=3)
 
         # Styling
-        ax.set_xlabel('Time Interval', fontsize=12)
+        ax.set_xlabel('Time Interval (s)', fontsize=12)
         ax.set_ylabel('P2 - P1 (mmHg)', fontsize=12)
 
         if title:
             ax.set_title(title, fontsize=14, fontweight='bold')
         else:
-            ax.set_title(f'Pressure Difference (P2 - P1) - {filename}\n{interval}s intervals, aggregated by mean',
+            ax.set_title(f'Pressure Difference (P2 - P1) - {filename}\n{interval}s intervals, aggregated by {agg_method}',
                         fontsize=14, fontweight='bold')
 
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels(labels, rotation=45, ha='right')
+        # Thin labels if too many time intervals
+        tick_positions, tick_labels = _thin_labels(labels)
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(tick_labels, rotation=45, ha='right')
         ax.grid(True, alpha=0.3, axis='y', linestyle='--')
 
         # Legend
@@ -195,11 +230,13 @@ def create_diverging_bar_chart(aggregated_data, file_labels, interval, title=Non
         if title:
             ax.set_title(title, fontsize=14, fontweight='bold')
         else:
-            ax.set_title(f'Pressure Difference (P2 - P1) - Multiple Files\n{interval}s intervals',
+            ax.set_title(f'Pressure Difference (P2 - P1) - Multiple Files\n{interval}s intervals, aggregated by {agg_method}',
                         fontsize=14, fontweight='bold')
 
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels(labels, rotation=45, ha='right')
+        # Thin labels if too many time intervals
+        tick_positions, tick_labels = _thin_labels(labels)
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(tick_labels, rotation=45, ha='right')
         ax.grid(True, alpha=0.3, axis='y', linestyle='--')
         ax.legend(loc='upper right', fontsize=9)
 
@@ -207,6 +244,8 @@ def create_diverging_bar_chart(aggregated_data, file_labels, interval, title=Non
 
     # Save or display
     if output_file:
+        if os.path.exists(output_file):
+            print(f"Replacing existing file: {output_file}")
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
         print(f"Figure saved to {output_file}")
     else:
@@ -231,7 +270,7 @@ Examples:
                        help='CSV file(s) from rhs_runs/ (can be just filenames or full paths)')
     parser.add_argument('--interval', type=float, default=1.0,
                        help='Time interval in seconds for aggregation (default: 1)')
-    parser.add_argument('--aggregation', choices=['mean', 'median', 'min', 'max'], default='mean',
+    parser.add_argument('--aggregation', choices=['mean', 'median', 'min', 'max'],
                        help='Aggregation method within each interval (default: mean)')
     parser.add_argument('--all', action='store_true',
                        help='Process all CSV files in rhs_runs/ directory')
@@ -287,7 +326,7 @@ Examples:
     print(f"\nGenerating diverging bar chart...")
     file_labels = list(aggregated_data.keys())
     create_diverging_bar_chart(aggregated_data, file_labels, args.interval,
-                               title=args.title, output_file=args.output)
+                               agg_method=args.aggregation, title=args.title, output_file=args.output)
 
     if not args.output:
         print("\nClose the plot window to exit.")
