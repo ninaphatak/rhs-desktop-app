@@ -165,8 +165,9 @@ def create_diverging_bar_chart(aggregated_data, file_labels, interval, agg_metho
         # Color based on sign: positive (red), negative (blue)
         colors = ['#d73027' if v > 0 else '#4575b4' for v in values]
 
-        bars = ax.bar(x_positions, values, color=colors, alpha=0.8,
-                     edgecolor='black', linewidth=0.5)
+        # bars is only used if we want to customize individual bars later (e.g., for annotations), but we can skip it for now: 
+        # bars = ax.bar(x_positions, values, color=colors, alpha=0.8,
+        #              edgecolor='black', linewidth=0.5)
 
         # Zero reference line
         ax.axhline(y=0, color='black', linewidth=2, linestyle='-', zorder=3)
@@ -295,7 +296,7 @@ Examples:
         file_paths = [filepath]
 
     # Load CSV files
-    print(f"\nLoading CSV files...")
+    print("\nLoading CSV files...")
     data_dict = load_csv_files(file_paths)
 
     if not data_dict:
@@ -323,7 +324,7 @@ Examples:
         print(f"  Number of intervals: {len(aggregated)}")
 
     # Create visualization
-    print(f"\nGenerating diverging bar chart...")
+    print("\nGenerating diverging bar chart...")
     file_labels = list(aggregated_data.keys())
     create_diverging_bar_chart(aggregated_data, file_labels, args.interval,
                                agg_method=args.aggregation, title=args.title, output_file=args.output)
