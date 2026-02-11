@@ -50,6 +50,9 @@ dist/
 # Jupyter Notebooks (if you use them)
 .ipynb_checkpoints/
 
+# Claude Code session files
+.claude/
+
 # Project instructions (internal use only)
 PROJECT_INSTRUCTIONS.md
 RHS_Development_Timeline.md
