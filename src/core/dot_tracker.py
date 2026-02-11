@@ -1,20 +1,26 @@
 """
 Dot Tracker - OpenCV-based dot detection with persistent ID tracking
 
-Purpose: Detect black dots on white valve using grayscale thresholding,
-         maintain consistent dot IDs across frames for displacement tracking.
+Purpose: Detect black dots on white valve using grayscale thresholding (automatic mode)
+         or user-provided seed positions (manual mode), maintain consistent dot IDs
+         across frames for displacement tracking.
 
-Input: 
+Modes:
+- Automatic: Global thresholding, detects all dots automatically
+- Manual: User clicks to select dots, OpenCV refines boundaries, frame-to-frame tracking
+
+Input:
 - Frame (numpy array, grayscale)
-- Threshold value (0-255, dots darker than this)
+- Mode: "automatic" or "manual"
+- Threshold value (0-255, dots darker than this) - automatic mode only
 - Min/max dot area (filter noise and large blobs)
 
 Output:
 {
     "timestamp": float,
     "dots": [
-        {"id": 0, "x": 523, "y": 412, "area": 156, "dx": 0, "dy": 0},
-        {"id": 1, "x": 891, "y": 398, "area": 142, "dx": 5, "dy": -2},
+        {"id": 0, "x": 523, "y": 412, "area": 156, "dx": 0, "dy": 0, "lost": False},
+        {"id": 1, "x": 891, "y": 398, "area": 142, "dx": 5, "dy": -2, "lost": True},
     ],
     "dot_count": int,
     "binary_mask": numpy.ndarray,  # For debugging/tuning UI
@@ -25,8 +31,12 @@ Class Structure:
     │
     ├── Methods:
     │   ├── detect(frame) → dict             # Find dots in frame
+    │   ├── set_mode(mode: str)              # Switch between automatic/manual
+    │   ├── add_manual_seed(x, y, radius)    # Add manual dot (manual mode)
+    │   ├── remove_manual_seed(seed_id)      # Remove manual dot
+    │   ├── clear_manual_seeds()             # Clear all manual dots
     │   ├── annotate_frame(frame, dots) → ndarray  # Draw circles on dots
-    │   ├── set_threshold(value: int)        # Adjust threshold
+    │   ├── set_threshold(value: int)        # Adjust threshold (automatic mode)
     │   ├── set_area_range(min, max)         # Adjust size filter
     │   ├── set_reference()                  # Set current positions as reference
     │   ├── calculate_displacement(dots, reference) → list
@@ -77,72 +87,106 @@ class DotTracker:
     
     def __init__(
         self,
+        mode: str = "automatic",
         threshold: int = 50,
         min_area: int = 30,
         max_area: int = 500,
         max_displacement: int = 100,
+        manual_search_radius: int = 30,
     ):
         """
         Initialize tracker.
-        
+
         Args:
+            mode: Detection mode - "automatic" or "manual"
             threshold: Binary threshold (0-255). Pixels darker than this are "dots"
             min_area: Minimum contour area in pixels
-            max_area: Maximum contour area in pixels  
+            max_area: Maximum contour area in pixels
             max_displacement: Max pixels a dot can move between frames for ID matching
+            manual_search_radius: Search radius for manual tracking (pixels)
+
+        Raises:
+            ValueError: If mode is invalid
         """
+        if mode not in ("automatic", "manual"):
+            raise ValueError(f"Invalid mode: {mode}. Must be 'automatic' or 'manual'")
+
+        self.mode = mode
         self.threshold = threshold
         self.min_area = min_area
         self.max_area = max_area
         self.max_displacement = max_displacement
-        
+        self.manual_search_radius = manual_search_radius
+
         # State for ID persistence
         self._previous_dots: list[TrackedDot] = []
         self._next_id = 0
-        
+
         # Reference positions for displacement calculation
         self._reference_positions: dict[int, tuple[int, int]] = {}
+
+        # Manual mode: user-provided seed positions
+        self._manual_seeds: dict[int, dict] = {}  # {id: {"x": int, "y": int, "radius": float}}
+        self._manual_seeds_changed = False
+        self._lost_dot_frames: dict[int, int] = {}  # Track lost dots: {id: frames_lost}
     
     def detect(self, frame: np.ndarray) -> dict:
         """
         Detect dots in frame and assign persistent IDs.
-        
+
         Args:
             frame: Grayscale numpy array (uint8)
-        
+
         Returns:
             Dict with timestamp, dots list, dot_count, and binary_mask
         """
         timestamp = time.time()
-        
+
         # Validate input
         if frame is None or frame.size == 0:
             return self._empty_result(timestamp)
-        
+
         # Ensure grayscale
         if len(frame.shape) == 3:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
+
+        # Dispatch to mode-specific detection
+        if self.mode == "automatic":
+            return self._detect_automatic(frame, timestamp)
+        else:  # manual mode
+            return self._detect_manual(frame, timestamp)
+
+    def _detect_automatic(self, frame: np.ndarray, timestamp: float) -> dict:
+        """
+        Automatic detection using global thresholding.
+
+        Args:
+            frame: Grayscale frame
+            timestamp: Frame timestamp
+
+        Returns:
+            Detection result dict
+        """
         # Step 1: Threshold (black dots on white background → THRESH_BINARY_INV)
         _, binary = cv2.threshold(
-            frame, 
-            self.threshold, 
-            255, 
+            frame,
+            self.threshold,
+            255,
             cv2.THRESH_BINARY_INV
         )
-        
+
         # Step 2: Find contours
         contours, _ = cv2.findContours(
-            binary, 
+            binary,
             cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_SIMPLE
         )
-        
+
         # Step 3: Filter contours by area and extract centroids
         raw_dots = []
         for contour in contours:
             area = cv2.contourArea(contour)
-            
+
             if self.min_area < area < self.max_area:
                 M = cv2.moments(contour)
                 if M["m00"] > 0:
@@ -153,22 +197,153 @@ class DotTracker:
                         "y": cy,
                         "area": area,
                     })
-        
+
         # Step 4: Assign persistent IDs
         tracked_dots = self._assign_ids(raw_dots)
-        
+
         # Step 5: Calculate displacement from reference
         dots_with_displacement = self._add_displacement(tracked_dots)
-        
+
         # Update state for next frame
         self._previous_dots = tracked_dots
-        
+
         return {
             "timestamp": timestamp,
             "dots": dots_with_displacement,
             "dot_count": len(tracked_dots),
             "binary_mask": binary,
         }
+
+    def _detect_manual(self, frame: np.ndarray, timestamp: float) -> dict:
+        """
+        Manual detection using user-provided seed positions.
+
+        On first frame or when seeds change: refine at each seed position.
+        On subsequent frames: search near previous positions.
+
+        Args:
+            frame: Grayscale frame
+            timestamp: Frame timestamp
+
+        Returns:
+            Detection result dict with "lost" field added to dots
+        """
+        from src.utils.dot_refinement import refine_dot_at_click
+
+        raw_dots = []
+
+        # First frame or seeds changed: refine at seed positions
+        if not self._previous_dots or self._manual_seeds_changed:
+            for seed_id, seed in self._manual_seeds.items():
+                refined = refine_dot_at_click(
+                    frame,
+                    seed["x"],
+                    seed["y"],
+                    search_radius=self.manual_search_radius,
+                    min_area=self.min_area,
+                    max_area=self.max_area,
+                )
+
+                if refined:
+                    raw_dots.append({
+                        "x": refined["x"],
+                        "y": refined["y"],
+                        "area": refined["area"],
+                        "seed_id": seed_id,  # Link to seed for ID assignment
+                    })
+
+            self._manual_seeds_changed = False
+
+        # Subsequent frames: search near previous positions
+        else:
+            for prev_dot in self._previous_dots:
+                refined = refine_dot_at_click(
+                    frame,
+                    prev_dot.x,
+                    prev_dot.y,
+                    search_radius=self.max_displacement,
+                    min_area=self.min_area,
+                    max_area=self.max_area,
+                )
+
+                if refined:
+                    raw_dots.append({
+                        "x": refined["x"],
+                        "y": refined["y"],
+                        "area": refined["area"],
+                    })
+
+        # Assign persistent IDs
+        tracked_dots = self._assign_ids(raw_dots)
+
+        # Handle lost dots (dots that couldn't be refined)
+        tracked_with_lost = self._handle_lost_dots(tracked_dots)
+
+        # Calculate displacement from reference
+        dots_with_displacement = self._add_displacement(tracked_with_lost)
+
+        # Update state for next frame (keep all dots including lost ones)
+        self._previous_dots = tracked_with_lost
+
+        # Create binary mask (empty for manual mode, since we don't do global thresholding)
+        binary = np.zeros(frame.shape, dtype=np.uint8)
+
+        return {
+            "timestamp": timestamp,
+            "dots": dots_with_displacement,
+            "dot_count": len(tracked_with_lost),
+            "binary_mask": binary,
+        }
+
+    def _handle_lost_dots(self, tracked_dots: list[TrackedDot]) -> list[TrackedDot]:
+        """
+        Track lost dots and remove them after threshold.
+
+        A dot is "lost" if it couldn't be refined in the current frame.
+        Keep lost dots for up to 10 frames, then remove.
+
+        Args:
+            tracked_dots: Dots successfully tracked in current frame
+
+        Returns:
+            Tracked dots with lost dots appended
+        """
+        MAX_LOST_FRAMES = 10
+
+        tracked_ids = {d.id for d in tracked_dots}
+        result = list(tracked_dots)
+
+        # Check which previous dots are now lost
+        for prev_dot in self._previous_dots:
+            if prev_dot.id not in tracked_ids:
+                # Dot is lost
+                if prev_dot.id not in self._lost_dot_frames:
+                    self._lost_dot_frames[prev_dot.id] = 1
+                else:
+                    self._lost_dot_frames[prev_dot.id] += 1
+
+                # Keep for up to MAX_LOST_FRAMES
+                if self._lost_dot_frames[prev_dot.id] <= MAX_LOST_FRAMES:
+                    # Use ref_x = -1 as a marker for lost dots
+                    lost_dot = TrackedDot(
+                        id=prev_dot.id,
+                        x=prev_dot.x,
+                        y=prev_dot.y,
+                        area=prev_dot.area,
+                        ref_x=-1,  # Marker for lost
+                        ref_y=-1,
+                    )
+                    result.append(lost_dot)
+                else:
+                    # Remove from lost tracking
+                    del self._lost_dot_frames[prev_dot.id]
+
+        # Clear lost tracking for dots that were found
+        for dot_id in tracked_ids:
+            if dot_id in self._lost_dot_frames:
+                del self._lost_dot_frames[dot_id]
+
+        return result
     
     def _assign_ids(self, raw_dots: list[dict]) -> list[TrackedDot]:
         """
@@ -249,9 +424,12 @@ class DotTracker:
         return id
     
     def _add_displacement(self, dots: list[TrackedDot]) -> list[dict]:
-        """Add displacement (dx, dy) from reference position."""
+        """Add displacement (dx, dy) from reference position and lost flag."""
         result = []
         for dot in dots:
+            # Check if dot is lost (marked with ref_x = -1)
+            is_lost = (dot.ref_x == -1)
+
             d = {
                 "id": dot.id,
                 "x": dot.x,
@@ -259,17 +437,98 @@ class DotTracker:
                 "area": dot.area,
                 "dx": 0,
                 "dy": 0,
+                "lost": is_lost,
             }
-            
-            if dot.id in self._reference_positions:
+
+            if not is_lost and dot.id in self._reference_positions:
                 ref_x, ref_y = self._reference_positions[dot.id]
                 d["dx"] = dot.x - ref_x
                 d["dy"] = dot.y - ref_y
-            
+
             result.append(d)
-        
+
         return result
     
+    def set_mode(self, mode: str):
+        """
+        Set detection mode.
+
+        Args:
+            mode: "automatic" or "manual"
+
+        Raises:
+            ValueError: If mode is invalid
+        """
+        if mode not in ("automatic", "manual"):
+            raise ValueError(f"Invalid mode: {mode}. Must be 'automatic' or 'manual'")
+
+        if mode != self.mode:
+            logger.info(f"Switching tracker mode: {self.mode} → {mode}")
+            self.mode = mode
+
+            # Reset tracking state when switching modes
+            self.reset()
+
+    def add_manual_seed(self, x: int, y: int, radius: float) -> int:
+        """
+        Add a manual seed position for manual tracking mode.
+
+        Args:
+            x: Seed X coordinate (image space)
+            y: Seed Y coordinate (image space)
+            radius: Approximate dot radius (for display)
+
+        Returns:
+            Seed ID (which will become the dot ID)
+
+        Example:
+            >>> tracker = DotTracker(mode="manual")
+            >>> seed_id = tracker.add_manual_seed(523, 412, 10.5)
+            >>> print(f"Added seed #{seed_id}")
+        """
+        seed_id = self._get_next_id()
+        self._manual_seeds[seed_id] = {
+            "x": x,
+            "y": y,
+            "radius": radius,
+        }
+        self._manual_seeds_changed = True
+        logger.info(f"Added manual seed #{seed_id} at ({x}, {y})")
+        return seed_id
+
+    def remove_manual_seed(self, seed_id: int):
+        """
+        Remove a manual seed by ID.
+
+        Args:
+            seed_id: ID of seed to remove
+        """
+        if seed_id in self._manual_seeds:
+            del self._manual_seeds[seed_id]
+            self._manual_seeds_changed = True
+            logger.info(f"Removed manual seed #{seed_id}")
+
+            # Also remove from reference positions if present
+            if seed_id in self._reference_positions:
+                del self._reference_positions[seed_id]
+
+    def clear_manual_seeds(self):
+        """Clear all manual seeds."""
+        count = len(self._manual_seeds)
+        self._manual_seeds.clear()
+        self._manual_seeds_changed = True
+        self._lost_dot_frames.clear()
+        logger.info(f"Cleared {count} manual seeds")
+
+    def get_manual_seeds(self) -> dict:
+        """
+        Get current manual seeds.
+
+        Returns:
+            Dict of {seed_id: {"x": int, "y": int, "radius": float}}
+        """
+        return dict(self._manual_seeds)
+
     def set_reference(self):
         """
         Set current dot positions as reference for displacement calculation.
@@ -278,6 +537,7 @@ class DotTracker:
         self._reference_positions = {
             dot.id: (dot.x, dot.y)
             for dot in self._previous_dots
+            if dot.ref_x != -1  # Don't set reference for lost dots
         }
         logger.info(f"Reference set for {len(self._reference_positions)} dots")
     
@@ -370,10 +630,13 @@ class DotTracker:
         self.max_area = max(self.min_area + 1, max_area)
     
     def reset(self):
-        """Reset tracker state (clears ID continuity)."""
+        """Reset tracker state (clears ID continuity and manual seeds)."""
         self._previous_dots.clear()
         self._next_id = 0
         self._reference_positions.clear()
+        self._manual_seeds.clear()
+        self._manual_seeds_changed = False
+        self._lost_dot_frames.clear()
     
     def _empty_result(self, timestamp: float) -> dict:
         """Return empty result for invalid input."""
