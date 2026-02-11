@@ -13,7 +13,7 @@ Python 3.11+ | PyQt6 + pyqtgraph | pypylon (Basler camera) | OpenCV | pyserial (
 
 ## How to Run
 ```bash
-conda activate rhs          # or your env name
+conda activate rhs-desktop          # or your env name
 python run.py               # launch the app
 python serial_reader.py     # standalone serial reader (legacy)
 pytest                      # run tests
@@ -66,6 +66,11 @@ IMPORTANT: Every new module or feature must have corresponding pytest tests. Run
 - f-strings for formatting
 - `pathlib.Path` over `os.path`
 - snake_case for functions/variables, PascalCase for classes
+
+## Git Workflow
+Always create a feature branch off the current branch before implementing new features.
+Branch naming: feature/<feature-name>, e.g. feature/manual-dot-selection.
+Commit frequently with descriptive messages. Do not push — I will review and push manually.
 
 ## Cross-Platform Notes
 - Serial ports: macOS = `/dev/tty.*` or `/dev/cu.*`, Windows = `COM*`
