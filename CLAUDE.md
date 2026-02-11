@@ -3,7 +3,8 @@
 A PyQt6 desktop app for the Right Heart Simulator (RHS) — a cardiovascular medical training device simulating post-Fontan hemodynamics. RHS = Right Heart Simulator.
 
 ## What This App Does
-Unified GUI for: Arduino sensor monitoring (HR, FR, P1, P2), data recording to CSV, data visualization, and camera-based dot tracking on a silicone heart valve.
+Unified GUI for: Arduino sensor monitoring (HR, FR, P1, P2), data recording to CSV, data visualization, and camera-based dot tracking on a silicone heart valve. Fiducial markers (black dots) on the silicone tricuspid valve are tracked to measure 3D leaflet displacement during simulated cardiac cycles, providing the data needed to characterize valve mechanical behavior and eventually calculate strain.
+
 
 **This is a read-only sensor monitoring app.** No bidirectional Arduino control. The solenoid is controlled by a manual potentiometer on the hardware.
 
