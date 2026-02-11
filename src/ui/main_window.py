@@ -1,9 +1,8 @@
-"""
-Docstring for main_window
+"""MainWindow - Main Application Window
 
-**Purpose:** Main application window, orchestrates all components
+Purpose: Main application window, orchestrates all components for read-only sensor monitoring.
 
-**Layout:**
+Layout:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Menu Bar: File | Settings | Help                            │
@@ -12,7 +11,7 @@ Docstring for main_window
 ├───────────────────────────┬─────────────────────────────────┤
 │                           │                                 │
 │     SENSOR PANEL          │       CAMERA PANEL              │
-│     (Left, 35%)           │       (Right, 65%)              │
+│     (Left, 40%)           │       (Right, 60%)              │
 │                           │                                 │
 │  ┌─────────────────────┐  │  ┌───────────────────────────┐  │
 │  │ P1/P2 Pressure      │  │  │                           │  │
@@ -31,7 +30,7 @@ Docstring for main_window
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Class Structure:**
+Class Structure:
 ```
 MainWindow(QMainWindow)
 │
@@ -42,8 +41,7 @@ MainWindow(QMainWindow)
 │   ├── dot_tracker: DotTracker
 │   ├── data_logger: DataLogger
 │   ├── sensor_panel: SensorPanel
-│   ├── camera_panel: CameraPanel
-│   └── control_panel: ControlPanel
+│   └── camera_panel: CameraPanel
 │
 ├── Methods:
 │   ├── _setup_ui()              # Create layout
@@ -53,8 +51,9 @@ MainWindow(QMainWindow)
 │   ├── _on_camera_connect()     # Handle camera connection
 │   ├── _on_frame_received(dict) # Process new frame
 │   ├── _on_record_clicked()     # Start/stop recording
-│   ├── _on_export_clicked()     # Export for MapAnything
 │   └── closeEvent(event)        # Clean shutdown
 ```
 
+Note: This is a read-only monitoring application. No hardware control panel or emergency stop.
+The hardware is controlled manually via potentiometer on the device.
 """

@@ -1,22 +1,19 @@
-"""
-Docstring for data_logger
----
+"""DataLogger - Sensor and Tracking Data Recording
 
-### `src/core/data_logger.py`
+Purpose: Record sensor data, dot positions, and frames to disk for analysis.
+This is READ-ONLY data logging - no control commands are logged.
 
-**Purpose:** Record sensor data, dot positions, and frames to disk
-
-**Input:**
+Input:
 - Output directory path
-- Sensor data dict
-- Tracking data dict
-- Frames (optional, for MapAnything export)
+- Sensor data dict (P1, P2, FLOW, HR)
+- Tracking data dict (dot positions)
+- Frames (optional, for visualization)
 
-**Output:**
+Output:
 - CSV file with columns: timestamp, elapsed, p1, p2, flow_rate, heart_rate, dot0_x, dot0_y, dot1_x, dot1_y, ...
-- Frames saved as JPG (when recording for MapAnything)
+- Frames saved as JPG (optional)
 
-**Class Structure:**
+Class Structure:
 ```
 DataLogger(QThread)
 │
@@ -46,29 +43,44 @@ DataLogger(QThread)
     ├── _write_csv_header()
     ├── _write_csv_row(data: dict)
     └── _save_frame(frame: ndarray, index: int)
+```
 
-    **New Feature:** Log control commands to CSV
+Example usage:
 ```python
+from PyQt6.QtCore import QThread, pyqtSignal as Signal
+from queue import Queue
+import time
+
 class DataLogger(QThread):
-    # ... existing code ...
-    
-    def log_data(self, sensor: dict, tracking: dict, frame, control_cmd: str = None):
-       
-        # Enhanced to log control commands
-        
-        # CSV columns:
-        # timestamp, elapsed, p1, p2, flow, hr, dot0_x, dot0_y, ..., control_command
-        
-        row = [
-            sensor['timestamp'],
-            sensor['elapsed'],
-            sensor['p1'],
-            sensor['p2'],
-            sensor['flow_rate'],
-            sensor['heart_rate'],
-            # ... dot positions ...
-            control_cmd if control_cmd else ""  # NEW: log command if present
-        ]
-        self._queue.put(row)
+    recording_started = Signal(str)
+    recording_stopped = Signal(str)
+    frame_saved = Signal(int)
+    error_occurred = Signal(str)
+
+    def __init__(self, output_dir):
+        super().__init__()
+        self.output_dir = output_dir
+        self._queue = Queue()
+        self._recording = False
+        self._csv_file = None
+        self._start_time = None
+        self._frame_count = 0
+
+    def log_data(self, sensor: dict, tracking: dict, frame=None):
+        # Queue data for writing (sensor data only, no control commands)
+        if self._recording:
+            elapsed = time.time() - self._start_time if self._start_time else 0
+            row = {
+                'timestamp': sensor.get('timestamp', time.time()),
+                'elapsed': elapsed,
+                'p1': sensor.get('P1', 0),
+                'p2': sensor.get('P2', 0),
+                'flow_rate': sensor.get('FLOW', 0),
+                'heart_rate': sensor.get('HR', 0),
+                **tracking  # dot positions
+            }
+            self._queue.put(('data', row))
+            if frame is not None:
+                self._queue.put(('frame', frame))
 ```
 """

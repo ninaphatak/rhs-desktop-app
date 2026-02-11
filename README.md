@@ -1,33 +1,24 @@
 # RHS Desktop Application
 
-**Right Heart Simulator - Control & Monitoring System**
+**Right Heart Simulator - Sensor Monitoring System**
 
-A desktop application for real-time monitoring and control of the Right Heart Simulator (RHS) medical training device. Built as a senior design project at UC Riverside (January-March 2025).
+A desktop application for real-time sensor monitoring and visualization of the Right Heart Simulator (RHS) medical training device. Built as a senior design project at UC Riverside (January-March 2025).
+
+**This is a read-only sensor monitoring app.** Hardware control (solenoid, BPM) is via manual potentiometer on the device.
 
 ## Features
 
-### Monitoring
 - Real-time sensor data visualization (pressure, flow rate, heart rate)
 - High-speed camera feed (60 fps) with dot tracking
 - CSV data logging with timestamps
-- 3D reconstruction export for MapAnything
-
-### Control 
-- **Hardware Control:** Fan, solenoid valve, BPM setpoint
-- **Three Control Modes:**
-  - POT: Potentiometer control (fallback)
-  - AUTO: App-controlled BPM with auto-pulsing
-  - MANUAL: Direct solenoid control
-- **Safety Features:** Emergency stop, command validation, mode constraints
-- **Bidirectional Communication:** Reliable command/acknowledgment protocol
+- Live plotting with 5-second rolling window
 
 ## Tech Stack
 
 - **Frontend:** PyQt6 + pyqtgraph
-- **Camera:** Basler pypylon SDK
+- **Camera:** Basler pypylon SDK (ace 2 a2A1920-160umBAS)
 - **Vision:** OpenCV
-- **Hardware:** Arduino (31250 baud serial)
-- **3D:** Meta MapAnything
+- **Hardware:** Arduino (31250 baud serial, read-only)
 
 ## Quick Start
 
@@ -57,26 +48,20 @@ python run.py
 
 See [RHS_Development_Timeline.md](RHS_Development_Timeline.md) for detailed progress.
 
-## Safety
-
-⚠️ **EMERGENCY STOP:** Large red button in toolbar kills all outputs immediately.
-
-See [docs/safety_guide.md](docs/safety_guide.md) for complete safety procedures.
-
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ [Port ▼] [Connect] [Camera ▼] [Connect Cam] [🔴 E-STOP] [Record]   │
-├──────────────────┬──────────────────┬───────────────────────────────┤
-│  SENSOR PANEL    │  CONTROL PANEL   │      CAMERA PANEL             │
-│  (Left, 25%)     │  (Middle, 25%)   │      (Right, 50%)             │
-│                  │                  │                               │
-│  • P1/P2 graphs  │  • Mode selector │  • Live camera feed           │
-│  • Flow graph    │  • Fan control   │  • Dot overlay                │
-│  • HR display    │  • BPM slider    │  • Tracking data              │
-│                  │  • Solenoid ctl  │                               │
-└──────────────────┴──────────────────┴───────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│ [Port ▼] [Connect] [Camera ▼] [Connect Cam] [Record]         │
+├──────────────────────────┬────────────────────────────────────┤
+│    SENSOR PANEL          │      CAMERA PANEL                  │
+│    (Left, 40%)           │      (Right, 60%)                  │
+│                          │                                    │
+│  • P1 pressure graph     │  • Live camera feed (60fps)        │
+│  • P2 pressure graph     │  • Dot tracking overlay            │
+│  • Flow rate graph       │  • Distance measurements           │
+│  • Heart rate display    │                                    │
+└──────────────────────────┴────────────────────────────────────┘
 ```
 
 ## Team

@@ -42,8 +42,6 @@ settings.json
 tmp/
 temp/
 
-# Claude Code session files
-.claude/
 
 # Build artifacts
 build/
@@ -62,6 +60,5 @@ RHS_Code_Structure_v2.md
 # RHS_Development_Timeline.md is the CURRENT 10-week timeline
 # RHS_Development_Timeline_BACKUP.md is the original 8-week plan (reference)
 # RHS_Code_Structure.md documents the architecture
-CLAUDE.md
 
 outputs/
