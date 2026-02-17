@@ -106,7 +106,6 @@ def refine_dot_at_click(
     )
 
     if not contours:
-        logger.debug(f"refine_dot_at_click: No contours found at ({click_x}, {click_y})")
         return None
 
     # Click position in ROI coordinates
@@ -143,7 +142,6 @@ def refine_dot_at_click(
 
     # No valid contour found
     if best_contour is None:
-        logger.debug(f"refine_dot_at_click: No valid contour near click at ({click_x}, {click_y})")
         return None
 
     # Calculate refined centroid in full-frame coordinates
@@ -156,11 +154,6 @@ def refine_dot_at_click(
 
     # Calculate equivalent radius (assuming circular dot)
     radius = np.sqrt(best_area / np.pi)
-
-    logger.debug(
-        f"refine_dot_at_click: Refined ({click_x}, {click_y}) → "
-        f"({cx_full}, {cy_full}), area={best_area:.1f}, radius={radius:.1f}"
-    )
 
     return {
         "x": cx_full,

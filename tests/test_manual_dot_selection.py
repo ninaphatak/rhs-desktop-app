@@ -8,36 +8,33 @@ feature without requiring MainWindow. It can be run directly with:
 
 Features demonstrated:
 - Live camera feed (MockCamera for testing, BaslerCamera if available)
-- Manual dot selection by clicking
-- OpenCV refinement of click positions
-- Frame-to-frame tracking
+- Manual dot selection by clicking (raw positions, no refinement)
 - Displacement visualization
-- Lost dot handling
 - Three-mode state machine (VIEW, SELECT, TRACKING)
 
 This serves as both a development test tool and a reference implementation
 for integrating manual dot selection into MainWindow.
 """
 
-import sys
 import logging
+import sys
 from pathlib import Path
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 from PyQt6.QtCore import pyqtSlot
+from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 
-from src.ui.camera_panel import CameraPanel, ViewMode
 from src.core.dot_tracker import DotTracker
-from src.utils.dot_refinement import refine_dot_at_click
+from src.ui.camera_panel import CameraPanel, ViewMode
 from tests.mock_camera import MockCamera
 
 # Try to import BaslerCamera
 try:
     from src.core.basler_camera import BaslerCamera
+
     BASLER_AVAILABLE = True
 except ImportError:
     BASLER_AVAILABLE = False
@@ -46,8 +43,7 @@ except ImportError:
 
 # Setup logging
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.WARNING, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -59,8 +55,7 @@ class ManualDotSelectionApp(QMainWindow):
     Demonstrates complete integration of:
     - CameraPanel (UI)
     - DotTracker (manual mode)
-    - OpenCV refinement
-    - Real-time tracking
+    - Raw click positions (no refinement)
     """
 
     def __init__(self, use_real_camera: bool = False):
@@ -101,7 +96,7 @@ class ManualDotSelectionApp(QMainWindow):
             cameras = BaslerCamera.list_cameras()
             if cameras:
                 logger.info(f"Found cameras: {cameras}")
-                self.camera.connect_camera(0)
+                self.camera.connect(0)
                 self.camera.start()
             else:
                 logger.error("No Basler cameras found")
@@ -142,45 +137,25 @@ class ManualDotSelectionApp(QMainWindow):
         """
         Handle user clicking to add a dot.
 
+        Uses raw click position directly — no OpenCV refinement.
+
         Args:
             x: Click X in image coordinates
             y: Click Y in image coordinates
         """
-        logger.info(f"User clicked at ({x}, {y}) to add dot")
+        # Use raw click position directly
+        dot_data = {
+            "x": x,
+            "y": y,
+            "radius": 5.0,
+            "area": 78.5,  # pi * 5^2
+        }
 
-        # Get current frame
-        frame = self.camera_panel.current_frame
-        if frame is None:
-            logger.warning("No frame available for refinement")
-            return
+        # Add to tracker
+        dot_id = self.tracker.add_manual_seed(x, y, dot_data["radius"])
 
-        # Refine dot boundary
-        refined = refine_dot_at_click(
-            frame,
-            x,
-            y,
-            search_radius=30,
-            min_area=30,
-            max_area=500,
-        )
-
-        if refined:
-            logger.info(f"Refinement succeeded: {refined}")
-
-            # Add to tracker
-            dot_id = self.tracker.add_manual_seed(
-                refined["x"],
-                refined["y"],
-                refined["radius"]
-            )
-
-            # Add visual to panel
-            self.camera_panel.add_dot_visual(refined, dot_id)
-
-            logger.info(f"Added dot #{dot_id} at ({refined['x']}, {refined['y']})")
-        else:
-            logger.warning(f"Refinement failed at ({x}, {y})")
-            self.camera_panel.show_refinement_failed(x, y)
+        # Add visual to panel
+        self.camera_panel.add_dot_visual(dot_data, dot_id)
 
     @pyqtSlot(int)
     def _on_user_remove_dot(self, dot_id: int):
@@ -246,7 +221,7 @@ def main():
     parser.add_argument(
         "--real-camera",
         action="store_true",
-        help="Use real Basler camera instead of MockCamera"
+        help="Use real Basler camera instead of MockCamera",
     )
     args = parser.parse_args()
 

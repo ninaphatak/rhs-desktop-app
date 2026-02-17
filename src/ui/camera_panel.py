@@ -15,7 +15,7 @@ from typing import Optional
 
 import numpy as np
 from PyQt6.QtCore import Qt, pyqtSignal, QPointF
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtGui import QPixmap, QImage, QPainter
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -77,7 +77,7 @@ class CameraPanel(QWidget):
         # Graphics scene and view
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
-        self.view.setRenderHint(self.view.RenderHint.Antialiasing)
+        self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
 
         # Frame item (holds camera image)
