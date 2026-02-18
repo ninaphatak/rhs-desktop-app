@@ -48,10 +48,10 @@ class Dot:
         self.random_walk_speed = 5  # pixels/sec
 
         # Size (radius in pixels)
-        self.radius = random.randint(8, 20)
+        self.radius = random.randint(4, 8)
 
         # Intensity (0-255 grayscale)
-        self.intensity = random.randint(200, 255)
+        self.intensity = random.randint(20, 50)
 
         # Color identifier (for tracking)
         self.color_id = random.randint(0, 2)  # 0=red, 1=green, 2=blue
@@ -103,7 +103,7 @@ class Dot:
         mask = np.maximum(0, 1 - (distance - self.radius) / 2)
 
         # Draw dot (additive blending)
-        frame[:, :] = np.clip(frame + (mask * self.intensity).astype(np.uint8), 0, 255)
+        frame[:, :] = np.clip(frame.astype(np.int16) - (mask * (255 - self.intensity)).astype(np.int16), 0, 255).astype(np.uint8)
 
 
 class MockCamera(QThread):
@@ -226,7 +226,7 @@ class MockCamera(QThread):
     def _generate_frame(self, dt) -> dict:
         """Generate synthetic frame with displacing dots"""
         # Create blank grayscale frame (dark background)
-        frame = np.full((self.HEIGHT, self.WIDTH), 20, dtype=np.uint8)
+        frame = np.full((self.HEIGHT, self.WIDTH), 220, dtype=np.uint8)
 
         # Add some noise (realistic camera noise)
         noise = np.random.randint(-5, 5, (self.HEIGHT, self.WIDTH), dtype=np.int16)
@@ -238,10 +238,6 @@ class MockCamera(QThread):
             dot.update(dt, self._time_elapsed)
             dot.draw(frame)
             displacements.append(dot.get_displacement())
-
-        # Simulate exposure effect (brighter = more exposure)
-        exposure_factor = self._exposure_us / 1000.0  # Normalize
-        frame = np.clip(frame.astype(np.float32) * (exposure_factor / 1000.0 + 0.5), 0, 255).astype(np.uint8)
 
         self._frame_count += 1
 
