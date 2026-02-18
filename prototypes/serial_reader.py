@@ -4,8 +4,8 @@ import serial.tools.list_ports
 import numpy as np #numeric arrays
 import time #used to measure elapsed time
 import csv #saving data into a csv file instead of a exe file which only runs on windows
-import tkinter as tk #GUI dialog for file saving
-from tkinter import filedialog #file dialog popup
+from pathlib import Path
+from datetime import datetime
 from PyQt6 import QtWidgets, QtCore, QtGui #GUI framework for the window plotting
 import pyqtgraph as pg #fast plotting library
 import glob
@@ -138,18 +138,33 @@ class RHSData(QtWidgets.QMainWindow):
         RHSData.FR = RHSData.FR[-300:]
         RHSData.HR = RHSData.HR[-300:]
 
-    def fileDestination():
-        root = tk.Tk()
-        filePath = filedialog.asksaveasfilename(title='Save as...', defaultextension='.csv')
-        root.destroy()
-        return filePath
-
     def closeCSV(self):
         self.f.close()
 
+def get_output_path() -> Path:
+    """Prompt for valve type and return an auto-numbered CSV path in outputs/."""
+    valid = {"silicone", "tpu"}
+    while True:
+        valve = input("Valve type? Enter 'silicone' or 'tpu': ").strip().lower()
+        if valve in valid:
+            break
+        print(f"  Invalid input '{valve}'. Please enter 'silicone' or 'tpu'.")
+
+    outputs_dir = Path(__file__).parent / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+
+    date_str = datetime.now().strftime("%d%m%Y")
+    n = 1
+    while True:
+        candidate = outputs_dir / f"{valve}_{date_str}_{n}.csv"
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
 # === Main execution block ===
 if __name__ == '__main__':
-    filePath = RHSData.fileDestination()
+    filePath = get_output_path()
     port_name = find_serial_port()
     dataSet = serial.Serial(port_name, 31250)
 
