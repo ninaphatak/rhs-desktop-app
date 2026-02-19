@@ -64,6 +64,8 @@ You should see `serial_reader.py` and `requirements_serial.txt` listed.
 
 ## Step 3: Create the Conda Environment
 
+ADD MORE INSTRUCTIONS FOR INSTALLING CONDA ON WINDOWS OR MAC
+
 Run these commands one at a time, pressing Enter after each:
 
 ```bash
