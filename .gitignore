@@ -21,6 +21,7 @@ ENV/
 # Output data (don't commit recordings)
 output/*/
 !output/.gitkeep
+*.avi
 
 # OS
 .DS_Store
