@@ -7,7 +7,7 @@
 const int PT1Pin = A0;
 const int PT2Pin = A1;
 const int FRPin = A2;
-const int POTPin = A3;
+// const int POTPin = A3;
 // Declare digital input pins
 const int Tin = 2; // Digital input pin for all temperature sensors
 // Declare analog output pins
@@ -17,11 +17,11 @@ const int SPin = 13;
 const float SRMax = 921.6;
 const float SRMin = 102.4;
 const int PTMax = 5;
-const float BPMMax = 180.0;
+// const float BPMMax = 180.0;
 const int FRMax = 50;
 const int FRMin = 2;
-const int POTMax = 960;
-const int POTMin = 70;
+// const int POTMax = 960;
+// const int POTMin = 70;
 // Set baudRate and conversions
 const int baudRate = 31250;
 const float mmHg = 51.715;
@@ -30,7 +30,7 @@ const float mL = 16.6667;
 float PT1 = 0.0;
 float PT2 = 0.0;
 int FR = 0;
-int BPM = 0;
+int BPM = 60;
 int readDelay = 0;
 // Declare temperature variables
 float VT1 = 0.0;
@@ -85,12 +85,12 @@ void loop()
     // Sensor read loop - solenoid open phase
     for (int readCount = 0; readCount < 10; readCount++)
     {
-        BPM = analogRead(POTPin);
+        // BPM = analogRead(POTPin);
         PT1 = analogRead(PT1Pin);
         PT2 = analogRead(PT2Pin);
         FR = analogRead(FRPin);
 
-        BPM = ((BPM - POTMin) * BPMMax) / (POTMax - POTMin);
+        // BPM = ((BPM - POTMin)*BPMMax)/(POTMax-POTMin);
         PT1 = abs(((PT1 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
         PT2 = abs(((PT2 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
         FR = (abs((((FR - SRMin) * (FRMax - FRMin)) / (SRMax - SRMin))) + FRMin) * mL;
@@ -138,12 +138,12 @@ void loop()
     // Sensor read loop - solenoid closed phase
     for (int readCount = 0; readCount < 10; readCount++)
     {
-        BPM = analogRead(POTPin);
+        // BPM = analogRead(POTPin);
         PT1 = analogRead(PT1Pin);
         PT2 = analogRead(PT2Pin);
         FR = analogRead(FRPin);
 
-        BPM = ((BPM - POTMin) * BPMMax) / (POTMax - POTMin);
+        // BPM = ((BPM - POTMin)*BPMMax)/(POTMax-POTMin);
         PT1 = abs(((PT1 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
         PT2 = abs(((PT2 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
         FR = (abs((((FR - SRMin) * (FRMax - FRMin)) / (SRMax - SRMin))) + FRMin) * mL;
