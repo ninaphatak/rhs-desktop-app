@@ -9,7 +9,7 @@ const int PT2Pin = A1;
 const int FRPin = A2;
 // const int POTPin = A3;
 // Declare digital input pins
-const int Tin = 2; // Digital input pin for all temperature sensors
+const int Tin = 2;
 // Declare analog output pins
 const int FPin = 12;
 const int SPin = 13;
@@ -17,11 +17,8 @@ const int SPin = 13;
 const float SRMax = 921.6;
 const float SRMin = 102.4;
 const int PTMax = 5;
-// const float BPMMax = 180.0;
 const int FRMax = 50;
 const int FRMin = 2;
-// const int POTMax = 960;
-// const int POTMin = 70;
 // Set baudRate and conversions
 const int baudRate = 31250;
 const float mmHg = 51.715;
@@ -30,12 +27,13 @@ const float mL = 16.6667;
 float PT1 = 0.0;
 float PT2 = 0.0;
 int FR = 0;
-int BPM = 60;
+int BPM = 130;
 int readDelay = 0;
 // Declare temperature variables
 float VT1 = 0.0;
 float VT2 = 0.0;
 float AT1 = 0.0;
+unsigned long lastTempRead = 0;
 
 // Temperature sensor setup
 OneWire oneWire(Tin);
@@ -54,8 +52,8 @@ void setup()
     pinMode(SPin, OUTPUT);
     pinMode(FPin, OUTPUT);
 
-    // Initialize temperature sensors
     sensors.begin();
+    sensors.setWaitForConversion(false);
     if (!sensors.getAddress(sensor1, 0))
     {
         Serial.println("Sensor 1 not found!");
@@ -68,34 +66,43 @@ void setup()
     {
         Serial.println("Sensor 3 not found!");
     }
+
+    // Initial temperature read so values aren't zero at startup
+    sensors.requestTemperatures();
+    delay(100);
+    VT1 = sensors.getTempC(sensor3);
+    VT2 = sensors.getTempC(sensor2);
+    AT1 = sensors.getTempC(sensor1);
+    lastTempRead = millis();
 }
 
 void loop()
 {
-    // Request temperature readings from all 3 sensors
-    sensors.requestTemperatures();
-    VT1 = sensors.getTempC(sensor1);
-    VT2 = sensors.getTempC(sensor2);
-    AT1 = sensors.getTempC(sensor3);
+    // Update temperatures every 500ms, non-blocking
+    if (millis() - lastTempRead > 500)
+    {
+        sensors.requestTemperatures();
+        VT1 = sensors.getTempC(sensor3);
+        VT2 = sensors.getTempC(sensor2);
+        AT1 = sensors.getTempC(sensor1);
+        lastTempRead = millis();
+    }
 
-    // Turn on fan and open solenoid
     digitalWrite(FPin, HIGH);
     digitalWrite(SPin, HIGH);
 
-    // Sensor read loop - solenoid open phase
     for (int readCount = 0; readCount < 10; readCount++)
     {
-        // BPM = analogRead(POTPin);
+        unsigned long iterStart = millis();
+
         PT1 = analogRead(PT1Pin);
         PT2 = analogRead(PT2Pin);
         FR = analogRead(FRPin);
 
-        // BPM = ((BPM - POTMin)*BPMMax)/(POTMax-POTMin);
         PT1 = abs(((PT1 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
         PT2 = abs(((PT2 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
         FR = (abs((((FR - SRMin) * (FRMax - FRMin)) / (SRMax - SRMin))) + FRMin) * mL;
 
-        // Serial output (added T1, T2, T3)
         Serial.print(PT1);
         Serial.print(" ");
         Serial.print(PT2);
@@ -113,37 +120,33 @@ void loop()
 
         readDelay = abs(30.0 / BPM) * 1000;
         readDelay = 0.1 * readDelay;
-        if (readCount < 9)
+
+        unsigned long iterElapsed = millis() - iterStart;
+        int adjustedDelay = readDelay - (int)iterElapsed;
+        if (readCount < 9 && adjustedDelay > 0)
         {
-            delay(readDelay);
+            delay(adjustedDelay);
         }
     }
 
-    // Close solenoid
     digitalWrite(SPin, LOW);
 
-    // Output to LCD Screen
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("P1:");
-    lcd.print(PT1);
-    lcd.print(" HR");
-    lcd.print(BPM);
-    lcd.setCursor(0, 1);
-    lcd.print("P2:");
-    lcd.print(PT2);
-    lcd.print(" FR");
-    lcd.print(FR);
+    // lcd.clear();
+    // lcd.setCursor(0,0);
+    // lcd.print("P1:"); lcd.print(PT1);
+    // lcd.print(" HR"); lcd.print(BPM);
+    // lcd.setCursor(0,1);
+    // lcd.print("P2:"); lcd.print(PT2);
+    // lcd.print(" FR"); lcd.print(FR);
 
-    // Sensor read loop - solenoid closed phase
     for (int readCount = 0; readCount < 10; readCount++)
     {
-        // BPM = analogRead(POTPin);
+        unsigned long iterStart = millis();
+
         PT1 = analogRead(PT1Pin);
         PT2 = analogRead(PT2Pin);
         FR = analogRead(FRPin);
 
-        // BPM = ((BPM - POTMin)*BPMMax)/(POTMax-POTMin);
         PT1 = abs(((PT1 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
         PT2 = abs(((PT2 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
         FR = (abs((((FR - SRMin) * (FRMax - FRMin)) / (SRMax - SRMin))) + FRMin) * mL;
@@ -152,7 +155,6 @@ void loop()
             FR = 0.0;
         }
 
-        // Serial output (added T1, T2, T3)
         Serial.print(PT1);
         Serial.print(" ");
         Serial.print(PT2);
@@ -170,9 +172,12 @@ void loop()
 
         readDelay = abs(30.0 / BPM) * 1000;
         readDelay = 0.1 * readDelay;
-        if (readCount < 9)
+
+        unsigned long iterElapsed = millis() - iterStart;
+        int adjustedDelay = readDelay - (int)iterElapsed;
+        if (readCount < 9 && adjustedDelay > 0)
         {
-            delay(readDelay);
+            delay(adjustedDelay);
         }
     }
 }
