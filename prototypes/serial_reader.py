@@ -261,7 +261,7 @@ def get_output_path() -> Path:
             break
         print(f"  Invalid input '{valve}'. Please enter 'silicone' or 'tpu'.")
 
-    outputs_dir = Path(__file__).parent / "outputs"
+    outputs_dir = Path(__file__).parent.parent / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
     date_str = datetime.now().strftime("%d%m%Y")
