@@ -4,7 +4,9 @@ import logging
 
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
+from src.core.data_recorder import DataRecorder
 from src.core.serial_reader import SerialReader
+from src.ui.control_bar import ControlBar
 from src.ui.graph_panel import GraphPanel
 
 logger = logging.getLogger(__name__)
@@ -29,10 +31,38 @@ class MainWindow(QMainWindow):
         self._graph_panel = GraphPanel()
         self._layout.addWidget(self._graph_panel, stretch=3)
 
+        # -- Control bar --
+        self._control_bar = ControlBar()
+        self._layout.addWidget(self._control_bar)
+
+        # -- Data recorder --
+        self._data_recorder = DataRecorder()
+
+        # Wire control bar signals
+        self._control_bar.record_clicked.connect(self._on_record)
+        self._control_bar.stop_clicked.connect(self._on_stop)
+
         # -- Serial reader --
         self._serial_reader: SerialReader | None = None
         self._mock_arduino = None
         self._start_serial()
+
+    # ------------------------------------------------------------------
+    # Recording
+    # ------------------------------------------------------------------
+
+    def _on_record(self) -> None:
+        filename = self._data_recorder.start_recording()
+        self._control_bar.set_recording(filename)
+
+    def _on_stop(self) -> None:
+        self._data_recorder.stop_recording()
+        self._control_bar.set_stopped()
+
+    def _on_data_received(self, data: dict) -> None:
+        """Route data to graphs and (if recording) to CSV."""
+        self._graph_panel.update_plots(data)
+        self._data_recorder.record_row(data)
 
     # ------------------------------------------------------------------
     # Serial
@@ -44,7 +74,7 @@ class MainWindow(QMainWindow):
             self._start_mock_serial()
         else:
             self._serial_reader = SerialReader()
-            self._serial_reader.data_received.connect(self._graph_panel.update_plots)
+            self._serial_reader.data_received.connect(self._on_data_received)
             self._serial_reader.connection_changed.connect(self._on_serial_connection)
             self._serial_reader.error_occurred.connect(self._on_serial_error)
             self._serial_reader.start()
@@ -54,7 +84,7 @@ class MainWindow(QMainWindow):
         try:
             from tests.mock_arduino import MockArduino
             self._mock_arduino = MockArduino()
-            self._mock_arduino.data_received.connect(self._graph_panel.update_plots)
+            self._mock_arduino.data_received.connect(self._on_data_received)
             self._mock_arduino.connection_changed.connect(self._on_serial_connection)
             self._mock_arduino.start()
             logger.info("Mock Arduino started")
@@ -77,6 +107,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Gracefully stop threads on window close."""
+        self._data_recorder.stop_recording()
         if self._serial_reader:
             self._serial_reader.stop()
         if self._mock_arduino:
