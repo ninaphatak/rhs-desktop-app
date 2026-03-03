@@ -41,6 +41,14 @@ class ControlBar(QWidget):
             btn.setStyleSheet(btn_style)
             layout.addWidget(btn)
 
+        # Solenoid control (disabled — requires firmware update)
+        self._start_rhs_btn = QPushButton("Start RHS")
+        self._start_rhs_btn.setEnabled(False)
+        self._start_rhs_btn.setToolTip("Requires firmware update — see docs/solenoid_protocol.md")
+        self._start_rhs_btn.setStyleSheet(btn_style)
+        layout.addWidget(self._start_rhs_btn)
+
+        # Spacer + status
         self._status = QLabel("Not recording")
         self._status.setStyleSheet("color: #aaa; font-size: 13px; margin-left: 12px;")
         layout.addWidget(self._status, stretch=1)
