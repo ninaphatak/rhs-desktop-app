@@ -31,5 +31,5 @@ if exist %HASH_FILE% (
 
 echo Launching RHS Monitor...
 call conda activate %ENV_NAME%
-python src/main.py %*
+python -m src.main %*
 pause
