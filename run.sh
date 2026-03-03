@@ -40,4 +40,4 @@ fi
 echo "Launching RHS Monitor..."
 eval "$(conda shell.bash hook)"
 conda activate "$ENV_NAME"
-python src/main.py "$@"
+python -m src.main "$@"

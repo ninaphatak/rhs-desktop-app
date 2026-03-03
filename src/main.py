@@ -1,7 +1,7 @@
 """RHS Monitor — main application entry point."""
 
-import sys
 import argparse
+import sys
 
 from PySide6.QtWidgets import QApplication
 
