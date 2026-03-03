@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         self._control_bar.record_clicked.connect(self._on_record)
         self._control_bar.stop_clicked.connect(self._on_stop)
         self._control_bar.plot_clicked.connect(self._on_plot)
+        self._control_bar.log_clicked.connect(self._on_log)
 
         # -- Serial reader --
         self._serial_reader: SerialReader | None = None
@@ -63,6 +64,11 @@ class MainWindow(QMainWindow):
     def _on_plot(self) -> None:
         from src.ui.plot_dialog import PlotDialog
         dlg = PlotDialog(self)
+        dlg.exec()
+
+    def _on_log(self) -> None:
+        from src.ui.log_dialog import LogDialog
+        dlg = LogDialog(self)
         dlg.exec()
 
     def _on_data_received(self, data: dict) -> None:
