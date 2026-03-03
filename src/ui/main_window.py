@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from src.core.data_recorder import DataRecorder
 from src.core.serial_reader import SerialReader
+from src.ui.camera_panel import CameraPanel
 from src.ui.control_bar import ControlBar
 from src.ui.graph_panel import GraphPanel
 
@@ -30,6 +31,10 @@ class MainWindow(QMainWindow):
         # -- Graph panel --
         self._graph_panel = GraphPanel()
         self._layout.addWidget(self._graph_panel, stretch=3)
+
+        # -- Camera panel --
+        self._camera_panel = CameraPanel()
+        self._layout.addWidget(self._camera_panel, stretch=2)
 
         # -- Control bar --
         self._control_bar = ControlBar()
@@ -120,6 +125,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         """Gracefully stop threads on window close."""
         self._data_recorder.stop_recording()
+        self._camera_panel.stop_cameras()
         if self._serial_reader:
             self._serial_reader.stop()
         if self._mock_arduino:
