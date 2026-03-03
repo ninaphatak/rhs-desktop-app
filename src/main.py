@@ -1,17 +1,36 @@
-'''
-Purpose: Application Entry Point
+"""RHS Monitor — main application entry point."""
 
-- Initializes PyQt6 application
-- creates main window
-- starts event loop
+import sys
+import argparse
 
-# Pseudocode structure
-def main():
+from PySide6.QtWidgets import QApplication
+
+from src.ui.main_window import MainWindow
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="RHS Monitor")
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Use mock Arduino and camera data (no hardware needed)",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    """Launch the RHS Monitor application."""
+    args = parse_args()
+
     app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
+    app.setApplicationName("RHS Monitor")
+
+    window = MainWindow(mock=args.mock)
+    window.showMaximized()
+
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()
-'''

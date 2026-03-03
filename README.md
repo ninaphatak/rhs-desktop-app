@@ -1,74 +1,79 @@
-# RHS Desktop Application
+# RHS Monitor
 
-**Right Heart Simulator - Sensor Monitoring System**
+**Right Heart Simulator — Desktop Monitoring Application**
 
-A desktop application for real-time sensor monitoring and visualization of the Right Heart Simulator (RHS) medical training device. Built as a senior design project at UC Riverside (January-March 2025).
+A PySide6 desktop app for real-time sensor monitoring, data recording, and run quality logging for the Right Heart Simulator (RHS) cardiovascular training device.
 
-**This is a read-only sensor monitoring app.** Hardware control (solenoid, BPM) is via manual potentiometer on the device.
+## Prerequisites
+
+1. **Conda** — Install [Miniconda](https://docs.anaconda.com/miniconda/) or Anaconda
+2. **Basler Pylon SDK** — Download from [baslerweb.com](https://www.baslerweb.com/) (required for camera feeds)
+
+## Setup
+
+```bash
+# macOS / Linux
+bash setup.sh
+
+# Windows
+setup.bat
+```
+
+This creates a `rhs-app` conda environment with all dependencies.
+
+## Run
+
+```bash
+# macOS / Linux
+bash run.sh
+
+# Windows
+run.bat
+
+# With mock data (no hardware needed)
+bash run.sh --mock
+```
 
 ## Features
 
-- Real-time sensor data visualization (pressure, flow rate, heart rate)
-- High-speed camera feed (60 fps) with dot tracking
-- CSV data logging with timestamps
-- Live plotting with 5-second rolling window
+- **Live sensor graphs** — Pressure (P1, P2), Flow Rate, Heart Rate, Temperature (VT1, VT2, AT1) at 30Hz
+- **Dual camera feeds** — Two Basler camera streams displayed simultaneously
+- **On-demand CSV recording** — Start/stop recording via GUI button; auto-named files in `outputs/`
+- **In-app plotting** — Select any recorded CSV and view 4 matplotlib subplots without leaving the app
+- **Run quality logging** — Rate runs as good/bad/neutral with notes, stored in `outputs/run_log.csv`
 
-## Tech Stack
+## Serial Data Format
 
-- **Frontend:** PyQt6 + pyqtgraph
-- **Camera:** Basler pypylon SDK (ace 2 a2A1920-160umBAS)
-- **Vision:** OpenCV
-- **Hardware:** Arduino (31250 baud serial, read-only)
-
-## Quick Start
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Install Basler Pylon SDK (camera)
-# Download from: https://www.baslerweb.com/
-
-# Run application
-python run.py
+7 space-separated values at 31250 baud:
+```
+P1 P2 FLOW HR VT1 VT2 AT1
 ```
 
-## Documentation
+| Field | Sensor | Unit |
+|-------|--------|------|
+| P1 | Atrium Pressure | mmHg |
+| P2 | Ventricle Pressure | mmHg |
+| FLOW | Flow Rate | mL/s |
+| HR | Heart Rate | BPM |
+| VT1 | Ventricle Temp 1 | C |
+| VT2 | Ventricle Temp 2 | C |
+| AT1 | Atrium Temp | C |
 
-- **[Development Timeline](RHS_Development_Timeline.md)** - 10-week implementation plan
-- **[Code Structure](RHS_Code_Structure.md)** - Architecture and component details
-- **[Project Instructions](PROJECT_INSTRUCTIONS.md)** - For AI assistance context
-- **[Arduino Protocol](docs/arduino_protocol.md)** - Command specification
-- **[Timeline Change Notice](TIMELINE_CHANGE_NOTICE.md)** - Why we expanded scope
-
-## Project Status
-
-**Current Phase:** Week [X] of 10  
-**Hardware Status:** Camera [pending/arrived] | Arduino [connected/pending]
-
-See [RHS_Development_Timeline.md](RHS_Development_Timeline.md) for detailed progress.
-
-## Architecture
+## Project Structure
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│ [Port ▼] [Connect] [Camera ▼] [Connect Cam] [Record]         │
-├──────────────────────────┬────────────────────────────────────┤
-│    SENSOR PANEL          │      CAMERA PANEL                  │
-│    (Left, 40%)           │      (Right, 60%)                  │
-│                          │                                    │
-│  • P1 pressure graph     │  • Live camera feed (60fps)        │
-│  • P2 pressure graph     │  • Dot tracking overlay            │
-│  • Flow rate graph       │  • Distance measurements           │
-│  • Heart rate display    │                                    │
-└──────────────────────────┴────────────────────────────────────┘
+src/
+  main.py              # App entry point
+  core/                # Business logic (serial reader, camera, data recorder, run logger)
+  ui/                  # GUI widgets (main window, graphs, cameras, dialogs)
+  utils/               # Config constants, port detection
+tests/                 # pytest tests + mock hardware
+outputs/               # Recorded CSVs + run log (gitignored)
+arduino/               # Arduino firmware
+docs/                  # Protocol specs
+legacy/                # Archived old code (serial_reader.py, plots, old src/)
 ```
 
 ## Team
 
-UC Riverside Bioengineering Senior Design Team  
-January - March 2025
-
-## License
-
-[To be determined]
+UC Riverside Bioengineering Senior Design — BIEN 175B (Winter 2026)

@@ -1,0 +1,17 @@
+name: rhs-app
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - matplotlib
+  - pip
+  - pip:
+    - PySide6>=6.6.0
+    - pyqtgraph>=0.13.0
+    - pyserial>=3.5
+    - pypylon>=3.0.0
+    - QT-PyQt-PySide-Custom-Widgets>=0.8.0
+    - pytest>=7.0.0
