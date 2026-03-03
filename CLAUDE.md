@@ -1,64 +1,69 @@
-# RHS Desktop Application
+# RHS Monitor
 
-A PyQt6 desktop app for the Right Heart Simulator (RHS) — a cardiovascular medical training device simulating post-Fontan hemodynamics. RHS = Right Heart Simulator.
+A PySide6 desktop app for the Right Heart Simulator (RHS) — a cardiovascular medical training device simulating post-Fontan hemodynamics. RHS = Right Heart Simulator.
 
 ## What This App Does
-Unified GUI for: Arduino sensor monitoring (HR, FR, P1, P2), data recording to CSV, data visualization, and camera-based dot tracking on a silicone heart valve. Fiducial markers (black dots) on the silicone tricuspid valve are tracked to measure 3D leaflet displacement during simulated cardiac cycles, providing the data needed to characterize valve mechanical behavior and eventually calculate strain.
-
-
-**This is a read-only sensor monitoring app.** No bidirectional Arduino control. The solenoid is controlled by a manual potentiometer on the hardware.
+Unified GUI for: Arduino sensor monitoring (P1, P2, Flow, HR, VT1, VT2, AT1), on-demand CSV recording, in-app data visualization, run quality logging, and dual Basler camera feeds. **This is a read-only sensor monitoring app.** The solenoid is controlled by a manual potentiometer on the hardware (serial command protocol designed but not yet implemented — see `docs/solenoid_protocol.md`).
 
 ## Tech Stack
-Python 3.11+ | PyQt6 + pyqtgraph | pypylon (Basler camera) | OpenCV | pyserial (31250 baud, read-only) | pandas/numpy | pytest + GitHub Actions
+Python 3.11+ | PySide6 + pyqtgraph | pypylon (Basler camera) | pyserial (31250 baud, read-only) | pandas/numpy | matplotlib (in-app dialogs) | pytest
 
 ## How to Run
 ```bash
-conda activate rhs-desktop          # or your env name
-python run.py               # launch the app
-python serial_reader.py     # standalone serial reader (legacy)
-pytest                      # run tests
-pytest tests/test_specific.py -v  # run specific test
+bash setup.sh          # Create/update rhs-app conda env (first time + after env changes)
+bash run.sh            # Launch the app
+bash run.sh --mock     # Launch with mock data (no hardware needed)
+pytest tests/ -v       # Run tests
 ```
 
 ## Project Structure
-- `src/core/` — Business logic: serial reader, camera, dot tracker, data logger, state manager
-- `src/ui/` — PyQt6 widgets: main window, sensor panel, camera panel, dialogs
-- `src/utils/` — Config, constants
+- `src/main.py` — App entry point (QApplication + MainWindow)
+- `src/core/` — Business logic: serial_reader, basler_camera, data_recorder, run_logger
+- `src/ui/` — PySide6 widgets: main_window, graph_panel, camera_panel, control_bar, plot_dialog, log_dialog
+- `src/utils/` — Config constants, port detection
 - `tests/` — pytest tests + mock hardware (mock_arduino.py, mock_camera.py)
-- `plots/` — Data visualization scripts (view_csv.py, compare_trials.py, visualize_pressure_diff.py)
-- `prototypes/` — Early experimental code (serial_reader.py versions)
+- `docs/` — Protocol specs (solenoid_protocol.md)
+- `outputs/` — Recorded CSVs + run_log.csv (gitignored)
 - `arduino/` — Arduino firmware (rhs_firmware.ino)
-- `docs/` — Documentation (protocol specs, guides, installation)
-- `outputs/` — Generated plots and recorded data
+- `legacy/` — Archived old code (serial_reader.py, plots, old src/)
 
 ## Architecture Rules
 - **QThread for all I/O** — serial and camera each get their own QThread. Never block the UI thread.
-- **Signal/Slot only** — StateManager is the central hub. Components communicate via Qt signals, not direct method calls between unrelated objects.
+- **Signal/Slot only** — Components communicate via PySide6 signals, not direct method calls between unrelated objects.
 - **No async/await** — we use QThreads, not asyncio.
 - **Rolling deque buffers** for real-time graphs (5-second window at 30Hz = maxlen 150).
+- **PySide6, not PyQt6** — all imports use `from PySide6.QtCore import QThread, Signal` etc.
+
+## Serial Data Protocol
+7 space-separated values at 31250 baud: `P1 P2 FLOW HR VT1 VT2 AT1\n`
+
+| Field | Name | Unit |
+|-------|------|------|
+| P1 | Atrium Pressure | mmHg |
+| P2 | Ventricle Pressure | mmHg |
+| FLOW | Flow Rate | mL/s |
+| HR | Heart Rate | BPM |
+| VT1 | Ventricle Temp 1 | C |
+| VT2 | Ventricle Temp 2 | C |
+| AT1 | Atrium Temp | C |
 
 ## Key Hardware Facts
-- Arduino outputs: `"P1 P2 FLOW HR\n"` space-separated, 31250 baud
+- Arduino outputs 7 fields, 31250 baud, read-only
 - Camera: Basler ace 2 a2A1920-160umBAS, 1920x1200 @ 60fps, monochrome, pypylon
-- Lens: 16mm Edmund Optics, ~140mm working distance
-- Dots: Black waterproof marker on white silicone valve (imperfect circles, operates underwater)
-- Second camera ordered for 30° offset (dual camera DIC — stretch goal, keep modular)
+- Second camera for dual feed (both display simultaneously in GUI)
 
 ## Current Status
-- ✅ serial_reader.py — works on macOS + Windows, live plots, CSV export
-- ✅ BaslerCamera class — captures frames via pypylon
-- ✅ DotTracker class — works but noisy, pivoting to manual dot selection
-- ✅ Visualization scripts — time-series, trial comparison, divergence charts
-- ✅ SyntheticValveGenerator — test data generation
-- 🔨 pytest + CI/CD — needs updating for new modules
-- 🔨 Unified PyQt6 app — needs building (integrate all existing components)
-- 🔨 Manual dot selection UI — user clicks to place, OpenCV refines boundaries
-- 🔨 Record button with t=0 reset
-- 🔨 In-app visualization tools
-- 📋 Dual camera DIC — stretch goal
+- Serial reader + live graphs (4 panels: pressure, flow, HR, temp)
+- On-demand CSV recording (Record/Stop buttons, auto-named files)
+- In-app matplotlib plotting dialog
+- Run quality logging (good/bad/neutral + notes)
+- Dual Basler camera panel
+- Mock mode (--mock flag for testing without hardware)
+- 17 pytest tests passing
+- Solenoid control: protocol designed, UI button present but disabled
 
 ## Testing Requirements
-IMPORTANT: Every new module or feature must have corresponding pytest tests. Run `pytest` before committing. CI runs on push via GitHub Actions.
+Every new module or feature must have corresponding pytest tests. Run `pytest tests/ -v` before committing.
 
 ## Code Style
 - Type hints on all function signatures
@@ -69,17 +74,24 @@ IMPORTANT: Every new module or feature must have corresponding pytest tests. Run
 
 ## Git Workflow
 Always create a feature branch off the current branch before implementing new features.
-Branch naming: feature/<feature-name>, e.g. feature/manual-dot-selection.
-Commit frequently with descriptive messages. Do not push — I will review and push manually.
+Branch naming: feature/<feature-name>. Commit frequently with descriptive messages.
+Do not push — I will review and push manually.
 
 ## Cross-Platform Notes
-- Serial ports: macOS = `/dev/tty.*` or `/dev/cu.*`, Windows = `COM*`
+- Serial ports: macOS = `/dev/cu.*`, Windows = `COM*`, Linux = `/dev/ttyUSB*`
 - File paths: always use `pathlib.Path`, never hardcode separators
-- Test on both macOS and Windows before merging
+- Setup: `setup.sh` (macOS/Linux) / `setup.bat` (Windows)
 
 ## What NOT to Build
-- ❌ Bidirectional Arduino control / command protocol
-- ❌ Hardware control panel (fan, solenoid, BPM modes)
-- ❌ Emergency stop from app (physical button on hardware)
-- ❌ Arduino firmware modifications
-- ❌ MapAnything integration (deferred)
+- Dot tracking / fiducial marker detection (deferred to future phase)
+- Bidirectional Arduino control (firmware modification required first)
+- Standalone executable packaging (PyInstaller/cx_Freeze)
+- MapAnything integration
+- CI/CD pipeline (GitHub Actions)
+
+## Available Skills
+When using any of the following skills, check `.claude/skills/` for the full instructions.
+- **arduino-serial-protocol** — 7-field serial format, parsing, CSV output
+- **pyqt-threading** — PySide6 QThread patterns for real-time I/O
+- **weekly-progress-summary** — Weekly progress slides for BIEN 175B
+- **update-memory** — Update memory from conversation transcripts
