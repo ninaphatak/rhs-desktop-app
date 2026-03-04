@@ -1,0 +1,4 @@
+# Exclude plan files and memory from auto-context during codebase exploration.
+# Reference these explicitly when needed (e.g., "read docs/plans/X-plan.md").
+docs/plans/
+memory/

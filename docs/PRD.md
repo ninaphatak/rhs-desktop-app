@@ -3,7 +3,7 @@
 ## 1. Product Overview
 
 **Product:** RHS Monitor — a PySide6 desktop application for the Right Heart Simulator
-**Users:** BIEN 175B research group (3-5 people, non-technical, using macOS and Windows)
+**Users:** BIEN 175B senior design group (1 software lead (user), rest non-technical for coding, using macOS and Windows)
 **Purpose:** Real-time sensor monitoring, data recording, and run quality logging for a cardiovascular simulator
 
 ## 2. Problem Statement
@@ -148,3 +148,20 @@ ControlBar (QPushButtons)
 **Firmware changes needed:** Add `Serial.available()` check in `loop()`, parse single-char commands, gate solenoid cycling behind a `running` boolean. ~15 lines of code.
 
 See `docs/solenoid_protocol.md` for full specification.
+
+## 12. Current Build State
+
+Update this table when features ship. This is the single source of truth for what is
+and isn't built — do not track build state in CLAUDE.md.
+
+| Goal (from §3)              | Status      | Notes                                       |
+|-----------------------------|-------------|---------------------------------------------|
+| Zero terminal interaction   | Done        | `bash run.sh` / `run.bat`                   |
+| Real-time sensor monitoring | Done        | 4 pyqtgraph panels, 30Hz rolling window     |
+| Dual camera feeds           | Done        | BaslerCamera QThread, auto-detect           |
+| On-demand CSV recording     | Done        | Record/Stop, auto-named, t=0 reset          |
+| In-app data visualization   | Done        | PlotDialog, matplotlib, 4 subplots          |
+| Run quality logging         | Done        | good/bad/neutral + notes, run_log.csv       |
+| Easy setup                  | Done        | setup.sh / setup.bat, environment.yml       |
+| Cross-platform              | Partial     | macOS tested; Windows untested              |
+| Solenoid control            | Not started | Protocol designed; firmware change needed   |

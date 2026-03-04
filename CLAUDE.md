@@ -5,6 +5,8 @@ A PySide6 desktop app for the Right Heart Simulator (RHS) — a cardiovascular m
 ## What This App Does
 Unified GUI for: Arduino sensor monitoring (P1, P2, Flow, HR, VT1, VT2, AT1), on-demand CSV recording, in-app data visualization, run quality logging, and dual Basler camera feeds. **This is a read-only sensor monitoring app.** The solenoid is controlled by a manual potentiometer on the hardware (serial command protocol designed but not yet implemented — see `docs/solenoid_protocol.md`).
 
+> See `docs/PRD.md` for product requirements and current build state.
+
 ## Tech Stack
 Python 3.11+ | PySide6 + pyqtgraph | pypylon (Basler camera) | pyserial (31250 baud, read-only) | pandas/numpy | matplotlib (in-app dialogs) | pytest
 
@@ -22,7 +24,7 @@ pytest tests/ -v       # Run tests
 - `src/ui/` — PySide6 widgets: main_window, graph_panel, camera_panel, control_bar, plot_dialog, log_dialog
 - `src/utils/` — Config constants, port detection
 - `tests/` — pytest tests + mock hardware (mock_arduino.py, mock_camera.py)
-- `docs/` — Protocol specs (solenoid_protocol.md)
+- `docs/` — PRD.md (requirements + build state), plans/ (design + implementation plans), solenoid_protocol.md
 - `outputs/` — Recorded CSVs + run_log.csv (gitignored)
 - `arduino/` — Arduino firmware (rhs_firmware.ino)
 - `legacy/` — Archived old code (serial_reader.py, plots, old src/)
@@ -52,18 +54,20 @@ pytest tests/ -v       # Run tests
 - Camera: Basler ace 2 a2A1920-160umBAS, 1920x1200 @ 60fps, monochrome, pypylon
 - Second camera for dual feed (both display simultaneously in GUI)
 
-## Current Status
-- Serial reader + live graphs (4 panels: pressure, flow, HR, temp)
-- On-demand CSV recording (Record/Stop buttons, auto-named files)
-- In-app matplotlib plotting dialog
-- Run quality logging (good/bad/neutral + notes)
-- Dual Basler camera panel
-- Mock mode (--mock flag for testing without hardware)
-- 17 pytest tests passing
-- Solenoid control: protocol designed, UI button present but disabled
-
 ## Testing Requirements
 Every new module or feature must have corresponding pytest tests. Run `pytest tests/ -v` before committing.
+
+## Mock Data Rules
+Do not introduce new mocks or expand mock coverage unless explicitly requested.
+`tests/mock_data.csv` and `tests/mock_arduino.py` exist for UI development and demos
+only — not for validating data-path logic. Serial data mocks do not accurately represent
+hardware behavior.
+
+When mock data is explicitly requested:
+1. **Values** — `tests/mock_data.csv` must be sourced from an actual recorded CSV in
+   `outputs/`. Do not generate synthetic data.
+2. **Timing** — `tests/mock_arduino.py` must use `delay_sec = 0.1 * abs(30.0 / BPM)`.
+   `_MOCK_BPM` is managed manually by the user — do not change it.
 
 ## Code Style
 - Type hints on all function signatures
@@ -89,9 +93,42 @@ Do not push — I will review and push manually.
 - MapAnything integration
 - CI/CD pipeline (GitHub Actions)
 
+## Context Management
+
+| Situation | Action |
+|-----------|--------|
+| Starting a session | Run `/update-memory` to sync `memory/MEMORY.md` from recent transcripts |
+| Picking up mid-feature | Read the relevant `docs/plans/` file — source of truth for where we left off |
+| Starting new feature | Brainstorm → design doc → writing-plans → plan saved to `docs/plans/` |
+| Finishing a feature | Update PRD.md §12 build state table, run `finishing-a-development-branch`, run `/update-memory` |
+
+**What each file owns:**
+
+| File | Owns | Update frequency |
+|------|------|-----------------|
+| `CLAUDE.md` | Dev conventions, architecture rules | Rarely |
+| `docs/PRD.md §12` | Current build state | Every feature |
+| `docs/plans/` | Feature designs + implementation plans | Every feature |
+| `memory/MEMORY.md` | Recent session context | Every session |
+
 ## Available Skills
 When using any of the following skills, check `.claude/skills/` for the full instructions.
+Superpowers skills are installed globally — invoke via the Skill tool.
+
+**Project-specific:**
 - **arduino-serial-protocol** — 7-field serial format, parsing, CSV output
 - **pyqt-threading** — PySide6 QThread patterns for real-time I/O
 - **weekly-progress-summary** — Weekly progress slides for BIEN 175B
 - **update-memory** — Update memory from conversation transcripts
+
+**Superpowers (global):**
+- **superpowers:brainstorming** — Design before code. Always runs before new features.
+- **superpowers:writing-plans** — Implementation plan after approved design.
+- **superpowers:executing-plans** — Execute a written plan task-by-task.
+- **superpowers:systematic-debugging** — Root cause analysis before any fix.
+- **superpowers:test-driven-development** — RED-GREEN-REFACTOR with review gate (see global CLAUDE.md).
+- **superpowers:verification-before-completion** — Run and paste actual output before claiming done.
+- **superpowers:using-git-worktrees** — Isolated worktree for feature branches.
+- **superpowers:finishing-a-development-branch** — Structured branch completion and merge.
+- **superpowers:subagent-driven-development** — Parallel subagents for independent tasks.
+- **superpowers:requesting-code-review** — Code review before merging.
