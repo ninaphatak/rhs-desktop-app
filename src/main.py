@@ -1,8 +1,10 @@
 """RHS Monitor — main application entry point."""
 
 import argparse
+import signal
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from src.ui.main_window import MainWindow
@@ -28,6 +30,13 @@ def main() -> None:
 
     window = MainWindow(mock=args.mock)
     window.showMaximized()
+
+    # Allow Ctrl+C to kill the app from the terminal
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    # Keepalive timer — periodically yields to Python so signals are processed
+    keepalive = QTimer()
+    keepalive.timeout.connect(lambda: None)
+    keepalive.start(200)
 
     sys.exit(app.exec())
 

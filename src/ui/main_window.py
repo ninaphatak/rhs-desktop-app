@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
 
     def _on_data_received(self, data: dict) -> None:
         """Route data to graphs and (if recording) to CSV."""
-        self._graph_panel.update_plots(data)
+        self._graph_panel.update_data(data)
         self._data_recorder.record_row(data)
 
     # ------------------------------------------------------------------

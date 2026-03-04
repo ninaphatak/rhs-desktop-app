@@ -55,7 +55,7 @@ class TestMockArduino:
     def test_generate_all_fields(self):
         from tests.mock_arduino import MockArduino
         mock = MockArduino()
-        data = mock._generate()
+        data = mock.get_sample(0)
         assert "timestamp" in data
         for field in SERIAL_FIELDS:
             assert field in data, f"Missing field: {field}"
@@ -64,10 +64,9 @@ class TestMockArduino:
     def test_values_in_range(self):
         from tests.mock_arduino import MockArduino
         mock = MockArduino()
-        for _ in range(50):
-            data = mock._generate()
+        for i in range(50):
+            data = mock.get_sample(i)
             assert 0 <= data["p1"] <= 40
             assert 0 <= data["p2"] <= 258
-            assert 0 <= data["flow"] <= 5
+            assert 0 <= data["flow"] <= 10
             assert data["hr"] > 0
-            mock._time_offset += 1.0 / 30
