@@ -252,7 +252,30 @@ git commit -m "Add Section 12 Current Build State to PRD"
 
 ---
 
-### Task 4: Final Verification
+### Task 4: Create `.claudeignore`
+
+**Files:**
+- Create: `.claudeignore`
+
+**Step 1: Create the file**
+
+```
+# Exclude plan files and memory from auto-context during codebase exploration.
+# Reference these explicitly when needed (e.g., "read docs/plans/X-plan.md").
+docs/plans/
+memory/
+```
+
+**Step 2: Commit**
+
+```bash
+git add .claudeignore
+git commit -m "Add .claudeignore to exclude plans and memory from auto-context"
+```
+
+---
+
+### Task 5: Final Verification
 
 **Step 1: Verify global CLAUDE.md**
 
@@ -280,9 +303,16 @@ grep -n "Current Build State\|Done\|Partial\|Not started" docs/PRD.md
 ```
 Expected: Section 12 heading + 9 table rows with status values.
 
-**Step 4: Verify git log**
+**Step 4: Verify .claudeignore**
+
+```bash
+cat .claudeignore
+```
+Expected: two entries — `docs/plans/` and `memory/`.
+
+**Step 5: Verify git log**
 
 ```bash
 git log --oneline -5
 ```
-Expected: three commits from this plan at the top.
+Expected: four commits from this plan at the top.
