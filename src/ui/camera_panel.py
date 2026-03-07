@@ -79,22 +79,34 @@ class CameraPanel(QWidget):
         self._display_frame(self._right_label, data["frame"])
 
     def _display_frame(self, label: QLabel, frame: np.ndarray) -> None:
-        """Convert numpy frame to QPixmap and display on label."""
+        """Convert numpy frame to QPixmap and crop-to-fill the label."""
         h, w = frame.shape[:2]
         if frame.ndim == 2:
-            # Grayscale
             qimg = QImage(frame.data, w, h, w, QImage.Format.Format_Grayscale8)
         else:
-            # Color (BGR → RGB)
             qimg = QImage(frame.data, w, h, w * 3, QImage.Format.Format_RGB888)
 
         pixmap = QPixmap.fromImage(qimg)
+        label_w, label_h = label.width(), label.height()
+        if label_w <= 0 or label_h <= 0:
+            return
+
+        # Scale to cover: use the larger scale factor so no gaps remain
+        scale_w = label_w / pixmap.width()
+        scale_h = label_h / pixmap.height()
+        scale = max(scale_w, scale_h)
         scaled = pixmap.scaled(
-            label.size(),
+            int(pixmap.width() * scale),
+            int(pixmap.height() * scale),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        label.setPixmap(scaled)
+
+        # Center-crop to label size
+        x = (scaled.width() - label_w) // 2
+        y = (scaled.height() - label_h) // 2
+        cropped = scaled.copy(x, y, label_w, label_h)
+        label.setPixmap(cropped)
 
     def stop_cameras(self) -> None:
         """Stop all camera threads."""
