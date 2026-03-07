@@ -13,7 +13,6 @@ class MockCamera(QThread):
 
     frame_ready = Signal(dict)
     connection_changed = Signal(bool)
-    fps_updated = Signal(float)
     error_occurred = Signal(str)
 
     WIDTH = 640
@@ -48,8 +47,6 @@ class MockCamera(QThread):
         self.connection_changed.emit(True)
         self._start_time = time.time()
         last_frame = time.time()
-        fps_samples: list[float] = []
-        last_fps_emit = time.time()
 
         while self._running:
             now = time.time()
@@ -62,13 +59,6 @@ class MockCamera(QThread):
                     "frame": frame,
                     "frame_number": self._frame_count,
                 })
-                dt = now - last_frame
-                fps_samples.append(1.0 / dt if dt > 0 else 0)
-                if len(fps_samples) > 30:
-                    fps_samples.pop(0)
-                if now - last_fps_emit >= 1.0:
-                    self.fps_updated.emit(sum(fps_samples) / len(fps_samples))
-                    last_fps_emit = now
                 last_frame = now
             time.sleep(0.001)
 

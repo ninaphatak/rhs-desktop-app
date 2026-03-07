@@ -2,7 +2,6 @@
 
 import time
 import logging
-from collections import deque
 from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
@@ -25,7 +24,6 @@ class BaslerCamera(QThread):
 
     frame_ready = Signal(dict)
     connection_changed = Signal(bool)
-    fps_updated = Signal(float)
     error_occurred = Signal(str)
 
     def __init__(self, parent=None) -> None:
@@ -35,9 +33,7 @@ class BaslerCamera(QThread):
         self._connected = False
         self.target_fps = 30
         self.exposure_us = 25000
-        self._frame_times: deque = deque(maxlen=60)
         self._frame_count = 0
-        self._last_fps_emit = 0.0
 
     @staticmethod
     def list_cameras() -> list[str]:
@@ -115,13 +111,13 @@ class BaslerCamera(QThread):
 
         self._running = True
         self._frame_count = 0
-        self._frame_times.clear()
-        self._last_fps_emit = time.time()
+        frame_interval = 1.0 / self.target_fps
 
         try:
             self._camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
             while self._running and self._camera.IsGrabbing():
                 try:
+                    frame_start = time.time()
                     timeout_ms = int(self.exposure_us / 1000) + 1000
                     grab = self._camera.RetrieveResult(timeout_ms, pylon.TimeoutHandling_Return)
                     if grab and grab.GrabSucceeded():
@@ -129,15 +125,15 @@ class BaslerCamera(QThread):
                         frame = grab.Array.copy()
                         grab.Release()
                         self._frame_count += 1
-                        self._frame_times.append(ts)
                         self.frame_ready.emit({
                             "timestamp": ts,
                             "frame": frame,
                             "frame_number": self._frame_count,
                         })
-                        if ts - self._last_fps_emit >= 1.0:
-                            self.fps_updated.emit(self._calc_fps())
-                            self._last_fps_emit = ts
+                        elapsed = time.time() - frame_start
+                        sleep_time = frame_interval - elapsed
+                        if sleep_time > 0:
+                            time.sleep(sleep_time)
                     elif grab:
                         grab.Release()
                 except Exception:
@@ -147,12 +143,6 @@ class BaslerCamera(QThread):
         finally:
             if self._camera and self._camera.IsGrabbing():
                 self._camera.StopGrabbing()
-
-    def _calc_fps(self) -> float:
-        if len(self._frame_times) < 2:
-            return 0.0
-        span = self._frame_times[-1] - self._frame_times[0]
-        return (len(self._frame_times) - 1) / span if span > 0 else 0.0
 
     def stop(self) -> None:
         self._running = False
