@@ -5,9 +5,9 @@ from collections import deque
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QWidget, QGridLayout
+from PySide6.QtWidgets import QGridLayout, QWidget
 
-from src.utils.config import GRAPH_BUFFER_SIZE, COLORS
+from src.utils.config import COLORS, GRAPH_BUFFER_SIZE
 
 
 class GraphPanel(QWidget):
@@ -49,7 +49,7 @@ class GraphPanel(QWidget):
         tick_font.setPixelSize(20)
 
         # Shared style for axis labels
-        label_style = {"font-size": "20px"}
+        label_style = {"font-size": "20px", "color": "white"}
 
         # -- Pressure plot (top-left) --
         self._pressure_plot = pg.PlotWidget(title="Pressure")
@@ -57,12 +57,18 @@ class GraphPanel(QWidget):
         self._pressure_plot.setLabel("bottom", "Time (s)", **label_style)
         self._pressure_plot.addLegend(labelTextSize="14pt")
         self._p1_curve = self._pressure_plot.plot(
-            pen=pg.mkPen(COLORS["p1"], width=2), name="P1 (Atrium)",
-            symbol="o", symbolSize=5, symbolBrush=COLORS["p1"],
+            pen=pg.mkPen(COLORS["p1"], width=2),
+            name="P1 (Atrium)",
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=COLORS["p1"],
         )
         self._p2_curve = self._pressure_plot.plot(
-            pen=pg.mkPen(COLORS["p2"], width=2), name="P2 (Ventricle)",
-            symbol="o", symbolSize=5, symbolBrush=COLORS["p2"],
+            pen=pg.mkPen(COLORS["p2"], width=2),
+            name="P2 (Ventricle)",
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=COLORS["p2"],
         )
         layout.addWidget(self._pressure_plot, 0, 0)
 
@@ -72,27 +78,39 @@ class GraphPanel(QWidget):
         self._hr_plot.setLabel("bottom", "Time (s)", **label_style)
         self._hr_plot.addLegend(labelTextSize="14pt")
         self._hr_curve = self._hr_plot.plot(
-            pen=pg.mkPen(COLORS["hr"], width=2), name="HR",
-            symbol="o", symbolSize=5, symbolBrush=COLORS["hr"],
+            pen=pg.mkPen(COLORS["hr"], width=2),
+            name="HR",
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=COLORS["hr"],
         )
         layout.addWidget(self._hr_plot, 0, 1)
 
         # -- Temperature plot (bottom-right) --
         self._temp_plot = pg.PlotWidget(title="Temperature")
-        self._temp_plot.setLabel("left", "C", **label_style)
+        self._temp_plot.setLabel("left", "ºC", **label_style)
         self._temp_plot.setLabel("bottom", "Time (s)", **label_style)
         self._temp_plot.addLegend(labelTextSize="14pt")
         self._vt1_curve = self._temp_plot.plot(
-            pen=pg.mkPen(COLORS["vt1"], width=2), name="VT1",
-            symbol="o", symbolSize=5, symbolBrush=COLORS["vt1"],
+            pen=pg.mkPen(COLORS["vt1"], width=2),
+            name="VT1",
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=COLORS["vt1"],
         )
         self._vt2_curve = self._temp_plot.plot(
-            pen=pg.mkPen(COLORS["vt2"], width=2), name="VT2",
-            symbol="o", symbolSize=5, symbolBrush=COLORS["vt2"],
+            pen=pg.mkPen(COLORS["vt2"], width=2),
+            name="VT2",
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=COLORS["vt2"],
         )
         self._at1_curve = self._temp_plot.plot(
-            pen=pg.mkPen(COLORS["at1"], width=2), name="AT1",
-            symbol="o", symbolSize=5, symbolBrush=COLORS["at1"],
+            pen=pg.mkPen(COLORS["at1"], width=2),
+            name="AT1",
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=COLORS["at1"],
         )
         layout.addWidget(self._temp_plot, 1, 0, 1, 2)
 
@@ -101,6 +119,7 @@ class GraphPanel(QWidget):
             plot.setBackground("#1e1e1e")
             for axis_name in ("bottom", "left"):
                 plot.getAxis(axis_name).setTickFont(tick_font)
+                plot.getAxis(axis_name).setTextPen("white")
 
     def update_data(self, data: dict) -> None:
         """Append new data point and mark dirty for next refresh.
