@@ -49,7 +49,7 @@ class GraphPanel(QWidget):
         tick_font.setPixelSize(20)
 
         # Shared style for axis labels
-        label_style = {"font-size": "20px"}
+        label_style = {"font-size": "20px", "color": "white"}
 
         # -- Pressure plot (top-left) --
         self._pressure_plot = pg.PlotWidget(title="Pressure")
@@ -112,6 +112,7 @@ class GraphPanel(QWidget):
             plot.setBackground("#1e1e1e")
             for axis_name in ("bottom", "left"):
                 plot.getAxis(axis_name).setTickFont(tick_font)
+                plot.getAxis(axis_name).setTextPen("white")
 
     def update_data(self, data: dict) -> None:
         """Append new data point and mark dirty for next refresh.
