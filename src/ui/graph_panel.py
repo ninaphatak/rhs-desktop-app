@@ -66,18 +66,7 @@ class GraphPanel(QWidget):
         )
         layout.addWidget(self._pressure_plot, 0, 0)
 
-        # -- Flow rate plot (top-right) --
-        self._flow_plot = pg.PlotWidget(title="Flow Rate")
-        self._flow_plot.setLabel("left", "mL/s", **label_style)
-        self._flow_plot.setLabel("bottom", "Time (s)", **label_style)
-        self._flow_plot.addLegend(labelTextSize="14pt")
-        self._flow_curve = self._flow_plot.plot(
-            pen=pg.mkPen(COLORS["flow"], width=2), name="Flow",
-            symbol="o", symbolSize=5, symbolBrush=COLORS["flow"],
-        )
-        layout.addWidget(self._flow_plot, 0, 1)
-
-        # -- Heart rate plot (bottom-left) --
+        # -- Heart rate plot (top-right) --
         self._hr_plot = pg.PlotWidget(title="Heart Rate")
         self._hr_plot.setLabel("left", "BPM", **label_style)
         self._hr_plot.setLabel("bottom", "Time (s)", **label_style)
@@ -86,7 +75,7 @@ class GraphPanel(QWidget):
             pen=pg.mkPen(COLORS["hr"], width=2), name="HR",
             symbol="o", symbolSize=5, symbolBrush=COLORS["hr"],
         )
-        layout.addWidget(self._hr_plot, 1, 0)
+        layout.addWidget(self._hr_plot, 0, 1)
 
         # -- Temperature plot (bottom-right) --
         self._temp_plot = pg.PlotWidget(title="Temperature")
@@ -105,10 +94,10 @@ class GraphPanel(QWidget):
             pen=pg.mkPen(COLORS["at1"], width=2), name="AT1",
             symbol="o", symbolSize=5, symbolBrush=COLORS["at1"],
         )
-        layout.addWidget(self._temp_plot, 1, 1)
+        layout.addWidget(self._temp_plot, 1, 0, 1, 2)
 
         # Dark background + tick font for all plots
-        for plot in [self._pressure_plot, self._flow_plot, self._hr_plot, self._temp_plot]:
+        for plot in [self._pressure_plot, self._hr_plot, self._temp_plot]:
             plot.setBackground("#1e1e1e")
             for axis_name in ("bottom", "left"):
                 plot.getAxis(axis_name).setTickFont(tick_font)
@@ -143,14 +132,13 @@ class GraphPanel(QWidget):
 
         self._p1_curve.setData(time_arr, np.array(self._p1))
         self._p2_curve.setData(time_arr, np.array(self._p2))
-        self._flow_curve.setData(time_arr, np.array(self._flow))
         self._hr_curve.setData(time_arr, np.array(self._hr))
         self._vt1_curve.setData(time_arr, np.array(self._vt1))
         self._vt2_curve.setData(time_arr, np.array(self._vt2))
         self._at1_curve.setData(time_arr, np.array(self._at1))
 
         # Trailing 5-second X-range
-        for plot in [self._pressure_plot, self._flow_plot, self._hr_plot, self._temp_plot]:
+        for plot in [self._pressure_plot, self._hr_plot, self._temp_plot]:
             plot.setXRange(t_now - 5, t_now, padding=0)
 
     def show_no_connection(self) -> None:
