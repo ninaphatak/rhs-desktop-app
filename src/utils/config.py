@@ -17,7 +17,6 @@ CSV_HEADERS = [
     "Time (s)",
     "Pressure 1 (mmHg)",
     "Pressure 2 (mmHg)",
-    "Flow Rate (mL/s)",
     "Heart Rate (BPM)",
     "Ventricle Temperature 1 (C)",
     "Ventricle Temperature 2 (C)",
