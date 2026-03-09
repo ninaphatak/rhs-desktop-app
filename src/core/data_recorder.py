@@ -79,5 +79,5 @@ class DataRecorder:
             self._record_start = data["timestamp"]
 
         t = round(data["timestamp"] - self._record_start, 4)
-        row = [t] + [data.get(field, 0.0) for field in SERIAL_FIELDS]
+        row = [t] + [data.get(field, 0.0) for field in SERIAL_FIELDS if field != "flow"]
         self._writer.writerow(row)
