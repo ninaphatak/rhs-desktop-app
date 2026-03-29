@@ -3,12 +3,12 @@
 A PySide6 desktop app for the Right Heart Simulator (RHS) — a cardiovascular medical training device simulating post-Fontan hemodynamics. RHS = Right Heart Simulator.
 
 ## What This App Does
-Unified GUI for: Arduino sensor monitoring (P1, P2, Flow, HR, VT1, VT2, AT1), on-demand CSV recording, in-app data visualization, run quality logging, and dual Basler camera feeds. **This is a read-only sensor monitoring app.** The solenoid is controlled by a manual potentiometer on the hardware (serial command protocol designed but not yet implemented — see `docs/solenoid_protocol.md`).
+Unified GUI for: Arduino sensor monitoring (P1, P2, Flow, HR, VT1, VT2, AT1), on-demand CSV recording, in-app data visualization, run quality logging, dual Basler camera feeds, and **leaflet boundary tracking** via computer vision. **This is a read-only sensor monitoring app.**
 
-> See `docs/PRD.md` for product requirements and current build state.
+> See `docs/PRD.md` for product requirements, CV pipeline design, and current build state.
 
 ## Tech Stack
-Python 3.11+ | PySide6 + pyqtgraph | pypylon (Basler camera) | pyserial (31250 baud, read-only) | pandas/numpy | matplotlib (in-app dialogs) | pytest
+Python 3.11+ | PySide6 + pyqtgraph | pypylon (Basler camera) | OpenCV (optical flow) | pyserial (31250 baud, read-only) | pandas/numpy | matplotlib (in-app dialogs) | pytest
 
 ## How to Run
 ```bash
@@ -20,14 +20,15 @@ pytest tests/ -v       # Run tests
 
 ## Project Structure
 - `src/main.py` — App entry point (QApplication + MainWindow)
-- `src/core/` — Business logic: serial_reader, basler_camera, data_recorder, run_logger
+- `src/core/` — Business logic: serial_reader, basler_camera, data_recorder, run_logger, leaflet_tracker
 - `src/ui/` — PySide6 widgets: main_window, graph_panel, camera_panel, control_bar, plot_dialog, log_dialog
 - `src/utils/` — Config constants, port detection
-- `tests/` — pytest tests + mock hardware (mock_arduino.py, mock_camera.py)
-- `docs/` — PRD.md (requirements + build state), plans/ (design + implementation plans), solenoid_protocol.md
+- `tests/` — pytest tests + mock hardware + `cv_frames/` (static valve frames for CV dev)
+- `tools/` — Standalone CV exploration scripts (not part of the main app)
+- `docs/` — PRD.md, plans/, solenoid_protocol.md
 - `outputs/` — Recorded CSVs + run_log.csv (gitignored)
 - `arduino/` — Arduino firmware (rhs_firmware.ino)
-- `legacy/` — Archived old code (serial_reader.py, plots, old src/)
+- `legacy/` — Archived old code
 
 ## Architecture Rules
 - **QThread for all I/O** — serial and camera each get their own QThread. Never block the UI thread.
@@ -39,35 +40,55 @@ pytest tests/ -v       # Run tests
 ## Serial Data Protocol
 7 space-separated values at 31250 baud: `P1 P2 FLOW HR VT1 VT2 AT1\n`
 
-| Field | Name | Unit |
-|-------|------|------|
-| P1 | Atrium Pressure | mmHg |
-| P2 | Ventricle Pressure | mmHg |
-| FLOW | Flow Rate | mL/s |
-| HR | Heart Rate | BPM |
-| VT1 | Ventricle Temp 1 | C |
-| VT2 | Ventricle Temp 2 | C |
-| AT1 | Atrium Temp | C |
+| Field | Unit |
+|-------|------|
+| P1 (Atrium Pressure) | mmHg |
+| P2 (Ventricle Pressure) | mmHg |
+| FLOW (Flow Rate) | mL/s |
+| HR (Heart Rate) | BPM |
+| VT1, VT2 (Ventricle Temp) | °C |
+| AT1 (Atrium Temp) | °C |
 
-## Key Hardware Facts
-- Arduino outputs 7 fields, 31250 baud, read-only
-- Camera: Basler ace 2 a2A1920-160umBAS, 1920x1200 @ 60fps, monochrome, pypylon
-- Second camera for dual feed (both display simultaneously in GUI)
+## Hardware Facts
+- Arduino: 7 fields, 31250 baud, read-only
+- Cameras: 2× Basler ace 2 a2A1920-160umBAS, 1920x1200 @ 60fps, monochrome
+- Camera positions: 0° direct view + 30° offset. Both positions are fixed — valve appears at the same pixel location every session.
+- Valve: white silicone tricuspid valve, 3 leaflets, operates underwater, leaflets bow outward toward camera when open
+- Visual conditions: bubbles on leaflet surface, uneven underwater lighting, dark triangular orifice when open
+
+## CV Pipeline — Current State
+
+**Status: EXPLORATION PHASE**
+
+We are tracking **leaflet boundary displacement** using sparse Lucas-Kanade optical flow on points along the leaflet boundary (where bright leaflet meets dark opening). Orifice area is a byproduct. The camera and valve positions are fixed across sessions, meaning ROI and reference positions are one-time calibration values.
+
+**What's been decided:**
+- Sparse optical flow (Lucas-Kanade) on leaflet boundary points — NOT dense flow on leaflet surface
+- Primary measurement: leaflet displacement. Secondary: orifice area from tracked polygon
+- 0° camera is primary tracking camera. 30° camera is secondary (stereo is stretch goal)
+- No deep learning, no spiderweb/HoughLinesP, no dot tracking (all evaluated and rejected — see PRD.md for rationale)
+
+**What's in progress:**
+- `tools/flow_explore.py` — dense Farneback flow visualization on recorded AVI to identify which pixels are reliably trackable before building the tracker
+- Need to record a 5-10 second AVI from the 0° Basler camera with the valve cycling
+
+**What's next (after exploration):**
+- Decide point initialization strategy (manual, auto-detect, or both)
+- Build `tools/leaflet_flow_test.py` — interactive LK tracking prototype on video
+- Integrate into main app as `src/core/leaflet_tracker.py`
+
+> See `docs/PRD.md` for full algorithm design, OpenCV function references, parameter ranges, and implementation notes.
 
 ## Testing Requirements
 Every new module or feature must have corresponding pytest tests. Run `pytest tests/ -v` before committing.
 
 ## Mock Data Rules
 Do not introduce new mocks or expand mock coverage unless explicitly requested.
-`tests/mock_data.csv` and `tests/mock_arduino.py` exist for UI development and demos
-only — not for validating data-path logic. Serial data mocks do not accurately represent
-hardware behavior.
+`tests/mock_data.csv` and `tests/mock_arduino.py` exist for UI development and demos only.
 
 When mock data is explicitly requested:
-1. **Values** — `tests/mock_data.csv` must be sourced from an actual recorded CSV in
-   `outputs/`. Do not generate synthetic data.
-2. **Timing** — `tests/mock_arduino.py` must use `delay_sec = 0.1 * abs(30.0 / BPM)`.
-   `_MOCK_BPM` is managed manually by the user — do not change it.
+1. **Values** — `tests/mock_data.csv` must be sourced from an actual recorded CSV in `outputs/`.
+2. **Timing** — `tests/mock_arduino.py` must use `delay_sec = 0.1 * abs(30.0 / BPM)`. `_MOCK_BPM` is managed manually by the user.
 
 ## Code Style
 - Type hints on all function signatures
@@ -87,7 +108,10 @@ Do not push — I will review and push manually.
 - Setup: `setup.sh` (macOS/Linux) / `setup.bat` (Windows)
 
 ## What NOT to Build
-- Dot tracking / fiducial marker detection (deferred to future phase)
+- Dense optical flow on leaflet surface (no texture — unreliable flow estimates)
+- Deep learning / CNN for segmentation (no GPU, unnecessary)
+- Dot tracking / fiducial markers (ID drift)
+- Spiderweb / HoughLinesP (bubble noise, 3D deformation)
 - Bidirectional Arduino control (firmware modification required first)
 - Standalone executable packaging (PyInstaller/cx_Freeze)
 - MapAnything integration
@@ -106,8 +130,8 @@ Do not push — I will review and push manually.
 
 | File | Owns | Update frequency |
 |------|------|-----------------|
-| `CLAUDE.md` | Dev conventions, architecture rules | Rarely |
-| `docs/PRD.md §12` | Current build state | Every feature |
+| `CLAUDE.md` | Dev conventions, architecture rules, current project state | When state changes |
+| `docs/PRD.md` | Requirements, CV pipeline design, build state | Every feature |
 | `docs/plans/` | Feature designs + implementation plans | Every feature |
 | `memory/MEMORY.md` | Recent session context | Every session |
 
@@ -126,7 +150,7 @@ Superpowers skills are installed globally — invoke via the Skill tool.
 - **superpowers:writing-plans** — Implementation plan after approved design.
 - **superpowers:executing-plans** — Execute a written plan task-by-task.
 - **superpowers:systematic-debugging** — Root cause analysis before any fix.
-- **superpowers:test-driven-development** — RED-GREEN-REFACTOR with review gate (see global CLAUDE.md).
+- **superpowers:test-driven-development** — RED-GREEN-REFACTOR with review gate.
 - **superpowers:verification-before-completion** — Run and paste actual output before claiming done.
 - **superpowers:using-git-worktrees** — Isolated worktree for feature branches.
 - **superpowers:finishing-a-development-branch** — Structured branch completion and merge.

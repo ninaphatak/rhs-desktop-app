@@ -1,167 +1,256 @@
-# RHS Monitor — Product Requirements Document
+# PRD: RHS Monitor — Product Requirements & Design
 
 ## 1. Product Overview
 
-**Product:** RHS Monitor — a PySide6 desktop application for the Right Heart Simulator
-**Users:** BIEN 175B senior design group (1 software lead (user), rest non-technical for coding, using macOS and Windows)
-**Purpose:** Real-time sensor monitoring, data recording, and run quality logging for a cardiovascular simulator
+RHS Monitor is a PySide6 desktop application for the Right Heart Simulator — a benchtop cardiovascular training device that simulates post-Fontan hemodynamics relevant to Hypoplastic Left Heart Syndrome (HLHS). The app provides real-time sensor monitoring, data recording, visualization, and computer vision-based leaflet boundary tracking for tricuspid valve assessment.
 
-## 2. Problem Statement
+## 2. Users
 
-The previous workflow required terminal interaction at every step: running `python serial_reader.py`, typing valve material, running separate plot scripts from the command line, and manually managing CSV files. Group members unfamiliar with Python/conda struggled to set up and use the tool. The codebase was cluttered with unused stubs, making it hard to maintain.
+- **Nina's 5 non-technical groupmates** — need zero-terminal UX; machines set up manually
+- **Dr. Lee (lab PI/sponsor)** — may use the app for research if the project succeeds
+- **Instructors** — Dr. McKee (BIEN 175B course), Dr. Lee (lab PI)
 
-## 3. Goals
+## 3. Core Features
 
-| Goal | Success Criteria |
-|------|-----------------|
-| Zero terminal interaction during use | App launches from a script; all features accessible via GUI buttons |
-| Real-time sensor monitoring | 4 live graphs (pressure, flow, HR, temperature) update at 30Hz |
-| Dual camera feeds | 2 Basler camera feeds display simultaneously in the GUI |
-| On-demand CSV recording | Users start/stop recording via button; graphs continue regardless |
-| In-app data visualization | Users plot any recorded CSV without leaving the app |
-| Run quality logging | Users rate runs (good/bad/neutral) with notes, stored in run_log.csv |
-| Easy setup for group members | Single setup script installs everything; single launch script runs the app |
-| Cross-platform | Works on macOS (bash) and Windows (batch) |
+### 3.1 Arduino Sensor Monitoring
+- Real-time plotting of P1, P2, Flow Rate, Heart Rate, VT1, VT2, AT1
+- 31250 baud serial, read-only, 7 space-separated fields
+- Rolling deque buffers (5-second window at 30Hz = maxlen 150)
+- pyqtgraph for real-time plotting
 
-## 4. Non-Goals (Out of Scope)
+### 3.2 Data Recording
+- On-demand CSV recording with t=0 reset on Record click
+- User-selected file path
+- Columns: timestamp, elapsed, P1, P2, flow_rate, heart_rate, VT1, VT2, AT1, plus CV columns when tracking is active
 
-- Dot tracking / fiducial marker detection (deferred to future phase)
-- Bidirectional Arduino control (firmware stays read-only in this phase)
-- Solenoid start/stop from GUI (protocol designed but not implemented; firmware modification required)
-- Standalone executable packaging (PyInstaller/cx_Freeze)
-- MapAnything integration
-- CI/CD pipeline (GitHub Actions)
+### 3.3 Data Visualization
+- Time-series plots (in-app)
+- Trial comparison
+- P2-P1 diverging bar charts with configurable aggregation (mean/median/max/min)
 
-## 5. User Workflows
+### 3.4 Dual Camera Feed
+- Two Basler ace 2 a2A1920-160umBAS cameras displayed simultaneously
+- 0° direct view (primary tracking camera) + 30° offset view
+- Both camera positions are fixed — valve appears at same pixel location every session
 
-### Workflow 1: Daily Use
-1. User double-clicks `run.sh` (macOS) or `run.bat` (Windows)
-2. App opens with live graphs streaming immediately (auto-detects Arduino)
-3. Two camera feeds appear below the graphs
-4. User adjusts air compressor / hardware as needed while watching live data
-5. When ready, user clicks **Record** — CSV recording begins (`rhs_YYYY-MM-DD_HH-MM-SS.csv`)
-6. Status bar shows "Recording: rhs_2026-03-03_14-30-22.csv"
-7. User clicks **Stop** — recording ends, graphs continue live
-8. User clicks **Plot** — file picker opens (defaults to `outputs/`), user selects the CSV, 4 subplots appear
-9. User clicks **Log** — dialog opens, user selects the CSV, rates it good/bad/neutral, adds notes
-10. User closes the app
+### 3.5 Leaflet Boundary Tracking (CV Pipeline)
+- Sparse Lucas-Kanade optical flow on points along leaflet boundaries
+- Primary measurement: leaflet displacement
+- Secondary measurement: orifice area (polygon of tracked points)
+- See §6 for full design
 
-### Workflow 2: First-Time Setup
-1. User installs Basler Pylon SDK from basler.com (documented prerequisite)
-2. User runs `setup.sh` (macOS) or `setup.bat` (Windows) — creates `rhs-app` conda env
-3. User runs `run.sh` / `run.bat` — app launches
-4. After a `git pull`, if `environment.yml` changed, `run.sh` prints "Dependencies changed. Re-run setup." and exits
+## 4. Hardware Specifications
 
-### Workflow 3: Post-Run Analysis (Without Hardware)
-1. User launches app (graphs show "No Arduino Connected" placeholder)
-2. User clicks **Plot** -> selects a previously recorded CSV -> views plots
-3. User clicks **Log** -> rates the run
+| Component | Spec |
+|-----------|------|
+| Arduino | 31250 baud, read-only, 7-field output |
+| Cameras | 2× Basler ace 2 a2A1920-160umBAS |
+| Resolution | 1920×1200 @ 60fps, monochrome |
+| Camera positions | 0° direct + 30° offset, FIXED positions |
+| Valve | White silicone tricuspid, 3 leaflets, underwater |
+| Valve behavior | Leaflets bow outward (toward camera) when open |
+| Visual conditions | Bubbles on surface, uneven underwater lighting |
+| Temperature sensors | Dallas sensors (VT1, VT2, AT1), cached reads every ~500ms |
 
-## 6. Serial Data Protocol
+## 5. Approaches Evaluated and Rejected
 
-| Field | Name | Unit | Arduino Variable | Index |
-|-------|------|------|-----------------|-------|
-| P1 | Atrium Pressure | mmHg | PT1 (analog A0) | 0 |
-| P2 | Ventricle Pressure | mmHg | PT2 (analog A1) | 1 |
-| FLOW | Flow Rate | mL/s | FRPin (analog A2) | 2 |
-| HR | Heart Rate | BPM | Hardcoded (130) | 3 |
-| VT1 | Ventricle Temp 1 | C | DS18B20 sensor 3 | 4 |
-| VT2 | Ventricle Temp 2 | C | DS18B20 sensor 2 | 5 |
-| AT1 | Atrium Temp | C | DS18B20 sensor 1 | 6 |
+### 5.1 Manual Dot Tracking (Fiducial Markers)
+**What:** User clicks on black dots drawn on valve surface, algorithm tracks them frame-to-frame using nearest-neighbor matching.
+**Why rejected:** ID assignment drift. When dots move fast between frames, the algorithm assigns the wrong ID — a dot that moved far is matched to a different dot that's now closer. At 180 BPM (3° per frame), dots jump significantly between frames. Also, dots give sparse information — 2-3 points can't capture spatial displacement patterns.
 
-Format: `"P1 P2 FLOW HR VT1 VT2 AT1\n"` — 7 space-separated values, 31250 baud
+### 5.2 Spiderweb Pattern + HoughLinesP
+**What:** Draw intersecting lines on valve surface, detect lines with HoughLinesP, compute intersection points as trackable nodes. Each node has structural identity (defined by which two lines created it), eliminating the ID assignment problem.
+**Why rejected after visual inspection:** Bubble coverage is far worse than assumed — dozens of bubbles on the leaflet surface generate false edges that HoughLinesP would detect. Leaflets undergo extreme 3D deformation (bowing toward camera), which means straight lines drawn on the surface would appear curved in the image. HoughLinesP only detects straight lines. Additionally, uneven underwater lighting creates mid-tone gradients that complicate edge detection.
 
-## 7. CSV Output Format
+### 5.3 Deep Learning / CNN Segmentation
+**What:** Train a U-Net or similar on annotated valve frames to segment the orifice boundary.
+**Why rejected:** No dedicated GPU available. CPU inference on 1920×1200 frames would cap at ~20-30fps even with a lightweight model. Colab free tier has limited GPU time and frequent disconnects. Training requires 100-200 annotated frames. The effort/complexity is disproportionate to the problem — the leaflet boundary already has high contrast that simpler methods can exploit.
 
-**Filename:** `rhs_YYYY-MM-DD_HH-MM-SS.csv` (auto-generated, no user prompt)
-**Location:** `outputs/` directory
-**Columns:**
-```
-Time (s),Pressure 1 (mmHg),Pressure 2 (mmHg),Flow Rate (mL/s),Heart Rate (BPM),Ventricle Temperature 1 (C),Ventricle Temperature 2 (C),Atrium Temperature (C)
-```
-**Time column:** Relative to record start (t=0 when user clicks Record)
+### 5.4 Pure Threshold Segmentation (Orifice Tracking)
+**What:** Binary threshold within a user-defined ROI to segment the dark orifice, extract the contour, measure area per frame.
+**Why partially rejected:** Threshold reliably captures ~85-90% of the orifice boundary — the dark core. However, at the three commissure tips (where adjacent leaflets meet), the gap between leaflets is gray, not dark. The leaflets have separated but the space isn't deep enough to appear black. Threshold contour stops short of the true leaflet boundary at these tips by ~10-15%.
 
-## 8. Run Log Format
+**Experimental evidence:** Tested on two static frames (open and closed valve, 0° camera). Binary threshold at 110 with Gaussian blur (11,11) within circular ROI: open valve detected 39,656px² area with clean contour along the dark core, but commissure tips were not captured. Canny edge detection confirmed the real leaflet edges exist at the tips — threshold just can't reach them.
 
-**File:** `outputs/run_log.csv`
-**Columns:** `timestamp,csv_filename,rating,notes`
-**Rating values:** `good`, `bad`, `neutral`
-**Append-only:** new rows added, never overwritten
+### 5.5 Threshold + Commissure Tip Anchors (Hybrid)
+**What:** Threshold for the dark core + 3 user-placed anchor points at commissure tips. For each tip, find nearby contour points, draw filled triangles from contour to tip on the binary mask, re-extract contour.
+**Why deprioritized:** The triangle extension geometry was fragile — base width selection, perpendicular projection, search radius all needed tuning. Multiple iterations (v1-v6) improved it but the contour at the tips still had visible straight-line artifacts from the triangle edges. Works but adds complexity for marginal benefit over the optical flow approach.
 
-## 9. GUI Layout
+### 5.6 Dense Optical Flow on Leaflet Surface
+**What:** Farneback dense optical flow across the entire valve to compute displacement field.
+**Why rejected for production:** Leaflet surface is uniform white silicone with no texture. Optical flow requires local intensity variation to compute displacement — a patch of uniform intensity produces near-zero eigenvalues in the structure tensor, meaning flow cannot be determined (see Lucas-Kanade eigenvalue condition, §2.4 of Wu "Optical Flow and Motion Analysis"). Bubbles provide some texture but may move independently of the leaflet surface.
 
-```
-+-------------------------------+
-|        RHS Monitor            |
-+---------------+---------------+
-|   Pressure    |   Flow Rate   |
-|  (P1 red,     |   (yellow)    |
-|   P2 blue)    |               |
-+---------------+---------------+
-|  Heart Rate   |  Temperature  |
-|   (white)     | (VT1/VT2/AT1)|
-+---------------+---------------+
-|   Camera 1    |   Camera 2    |
-|               |               |
-+---------------+---------------+
-| [Record] [Stop] [Plot] [Log] |
-|  Status: Not recording        |
-+-------------------------------+
-```
+**Note:** Dense flow (Farneback) IS being used for exploration/visualization to identify trackable regions. It is not suitable for production tracking.
 
-- Graphs: pyqtgraph PlotWidgets, 5-second rolling window, auto-scaling Y-axis
-- Cameras: QLabel with QPixmap, FPS overlay, "No Camera" placeholder if disconnected
-- Control bar: QPushButtons with status label
-- Window opens maximized
+## 6. CV Pipeline Design: Sparse Optical Flow on Leaflet Boundary
 
-## 10. Signal/Slot Architecture
+### 6.1 Core Concept
+Points placed along the leaflet boundary (where bright leaflet transitions to dark opening) are tracked frame-to-frame using Lucas-Kanade pyramidal optical flow. The leaflet boundary has the strongest intensity gradient in the frame (~150-220 leaflet intensity → ~7-80 opening intensity), producing well-conditioned flow estimates.
+
+**Why boundary points work for LK:** The reliability of Lucas-Kanade depends on the eigenvalues of the structure tensor A^T W^2 A within the search window. Points on a curved intensity edge have two large eigenvalues, meaning flow is uniquely determined. The leaflet boundary is curved, so most points along it satisfy this condition. (Reference: Wu, "Optical Flow and Motion Analysis," §2.4.)
+
+### 6.2 Camera Selection
+- **0° direct-view camera** is the primary tracking camera. Looks directly into the valve opening — bimodal intensity distribution (dark orifice vs bright leaflets), minimal foreshortening of the boundary.
+- **30° offset camera** can also track boundary points (boundary is still visible) but with more noise due to mid-tone shadows from the viewing angle.
+- **Stereo (stretch goal):** With both cameras calibrated, tracked boundary points can be triangulated in 3D for metric displacement. Requires underwater stereo calibration through water/acrylic interface (refraction invalidates standard calibration).
+
+### 6.3 Fixed Camera/Valve Positions
+Camera positions and valve housing position are fixed across sessions — the valve appears at the same pixel location (within ~2px) every recording. This means:
+- ROI is a one-time calibration value, saved to config
+- Closed-valve boundary positions (reference) are one-time calibration values
+- No per-session manual setup required once calibration is done
+
+### 6.4 Algorithm
 
 ```
-SerialReader (QThread)
-  ├─ data_received(dict) ──> GraphPanel.update_plots()
-  ├─ data_received(dict) ──> DataRecorder.record_row()  [if recording]
-  ├─ connection_changed(bool) ──> MainWindow.update_serial_status()
-  └─ error_occurred(str) ──> MainWindow.show_error()
+INITIALIZATION (first frame or loaded from config):
+    - ROI: circular mask around valve housing
+    - Initial points: N points along the leaflet boundary
+      (placement strategy TBD after exploration — manual, auto-detect, or hybrid)
 
-BaslerCamera #1 (QThread)
-  └─ frame_ready(ndarray) ──> CameraPanel.update_left()
-
-BaslerCamera #2 (QThread)
-  └─ frame_ready(ndarray) ──> CameraPanel.update_right()
-
-ControlBar (QPushButtons)
-  ├─ record_clicked ──> DataRecorder.start_recording()
-  ├─ stop_clicked ──> DataRecorder.stop_recording()
-  ├─ plot_clicked ──> PlotDialog.exec()
-  └─ log_clicked ──> LogDialog.exec()
+PER-FRAME TRACKING:
+    cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, prev_points, None, **lk_params)
+    → new_points, status, error
+    → Filter lost points (status == 0) and high-error points
+    → Compute per-point displacement from initial positions
+    → Compute orifice area = polygon area of tracked points
+    → Draw overlay on camera feed
 ```
 
-## 11. Future: Solenoid Control Protocol (Design Only)
+### 6.5 OpenCV Functions
 
-**Proposed serial commands** (requires firmware modification):
-- App sends `S\n` -> Arduino starts solenoid cycling
-- App sends `X\n` -> Arduino stops solenoid cycling
-- Arduino default: solenoid OFF on power-up (safe state)
+```python
+# Core tracking
+cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, prev_pts, None, **lk_params)
+    # lk_params:
+    #   winSize=(21, 21)       — search window, default 21
+    #   maxLevel=3             — pyramid levels
+    #   criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)
 
-**GUI:** "Start RHS" / "Stop RHS" toggle button in control bar (grayed out until firmware supports it)
+# Exploration (dense flow visualization, NOT for production)
+cv2.calcOpticalFlowFarneback(prev, curr, None, 0.5, 3, 15, 3, 5, 1.2, 0)
 
-**Firmware changes needed:** Add `Serial.available()` check in `loop()`, parse single-char commands, gate solenoid cycling behind a `running` boolean. ~15 lines of code.
+# Initialization: auto-detect boundary via threshold
+cv2.GaussianBlur(frame, (11, 11), 0)
+cv2.threshold(masked, thresh, 255, cv2.THRESH_BINARY_INV)
+cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-See `docs/solenoid_protocol.md` for full specification.
+# Initialization: find good tracking points
+cv2.goodFeaturesToTrack(gray, maxCorners, qualityLevel, minDistance, mask)
 
-## 12. Current Build State
+# Measurements
+cv2.contourArea(np.array(tracked_points))   # polygon area
+cv2.moments(contour)                         # centroid
 
-Update this table when features ship. This is the single source of truth for what is
-and isn't built — do not track build state in CLAUDE.md.
+# Visualization
+cv2.circle(frame, point, radius, color, thickness)
+cv2.polylines(frame, [points], isClosed=True, color, 2)
+cv2.arrowedLine(frame, pt_initial, pt_current, color, 1)
+cv2.cartToPolar(flow[..., 0], flow[..., 1])  # for flow visualization
+```
 
-| Goal (from §3)              | Status      | Notes                                       |
-|-----------------------------|-------------|---------------------------------------------|
-| Zero terminal interaction   | Done        | `bash run.sh` / `run.bat`                   |
-| Real-time sensor monitoring | Done        | 4 pyqtgraph panels, 30Hz rolling window     |
-| Dual camera feeds           | Done        | BaslerCamera QThread, auto-detect           |
-| On-demand CSV recording     | Done        | Record/Stop, auto-named, t=0 reset          |
-| In-app data visualization   | Done        | PlotDialog, matplotlib, 4 subplots          |
-| Run quality logging         | Done        | good/bad/neutral + notes, run_log.csv       |
-| Easy setup                  | Done        | setup.sh / setup.bat, environment.yml       |
-| Cross-platform              | Partial     | macOS tested; Windows untested              |
-| Solenoid control            | Not started | Protocol designed; firmware change needed   |
+### 6.6 Parameters
+
+| Parameter | Default | Range | Notes |
+|-----------|---------|-------|-------|
+| threshold_value | 110 | 60-180 | For auto-init boundary detection. Orifice ~7-80, leaflets ~150-220 |
+| blur_kernel | (11,11) | (3,3)-(31,31) odd | Suppresses bubble edge noise |
+| lk_winSize | (21,21) | (11,11)-(41,41) odd | LK search window |
+| lk_maxLevel | 3 | 1-5 | Pyramid levels for handling larger motion |
+| n_points | 30 | 10-60 | Number of boundary points to track |
+| error_threshold | TBD | — | Max LK error before marking point as lost |
+| roi_center | Fixed per camera | — | One-time calibration |
+| roi_radius | Fixed per camera | — | One-time calibration |
+
+### 6.7 Measurements Produced
+
+**Per frame:**
+- Tracked point positions: N × (x, y)
+- Per-point displacement from initial position: N × (dx, dy)
+- Mean and max displacement magnitude
+- Orifice area: polygon area of tracked points (byproduct)
+- Number of tracked vs lost points
+
+**Per cardiac cycle (using Arduino BPM for cycle boundaries):**
+- Peak displacement per leaflet edge
+- Residual displacement at valve closure
+- Displacement trajectory through cycle
+- Leaflet symmetry — do all 3 edges displace equally
+
+### 6.8 Lost Point Handling
+TBD after exploration. Options under consideration:
+- Mark as lost, stop tracking (simplest)
+- Re-detect locally using goodFeaturesToTrack in small window
+- Periodic drift correction by re-running threshold and snapping to boundary
+- Re-initialize all points if >50% lost
+
+### 6.9 Key Deliverable
+Synchronized time-series plot: mean leaflet boundary displacement overlaid with P1-P2 pressure differential from Arduino. Demonstrates end-to-end integration (camera CV + sensor data on same time axis).
+
+## 7. Exploration Phase
+
+### Current Step
+`tools/flow_explore.py` — Dense Farneback optical flow visualization on recorded AVI. Four-panel display: raw frame, flow magnitude, flow direction (HSV), flow arrows. Purpose: identify which pixels are reliably trackable before committing to a tracking strategy.
+
+### Questions to Answer from Exploration
+1. Does the leaflet boundary light up as the strongest flow region? (Expected: yes)
+2. Do bubbles create significant flow noise on the leaflet surface? (Determines whether auto-init threshold will be noisy)
+3. Is the valve housing truly zero-flow? (Confirms fixed position assumption)
+4. How large is frame-to-frame displacement at 60fps? (Validates LK parameter choices)
+5. Are the commissure tips trackable via flow? (The gray-gap problem may or may not affect LK)
+6. Is there visible flow difference between 0° and 30° camera views?
+
+### Next Steps (after exploration)
+1. Decide point initialization strategy
+2. Build `tools/leaflet_flow_test.py` — interactive sparse LK prototype on video
+3. Integrate into main app as `src/core/leaflet_tracker.py`
+
+## 8. Phase 2 — Stereo Tracking (Stretch Goal)
+
+Track boundary points in both 0° and 30° cameras. With stereo calibration, triangulate each point in 3D → metric leaflet displacement.
+
+**Calibration challenge:** Standard stereo calibration assumes light travels in straight lines. Underwater, light refracts at the water-acrylic interface. Options:
+- In-situ calibration: submerge checkerboard, calibrate with refraction baked into the model
+- RIM (Refractive Index Matching): glycerol-water mixtures to match acrylic refractive index (adds complexity)
+- Calibrate intrinsics in air, extrinsics submerged
+
+## 9. Regulatory Context
+
+The RHS does not meet the FDA Section 201(h) medical device definition — it is purely educational with no patient contact. ViVitro Pulse Duplicator is a comparable non-regulated precedent. IEC 62304, 21 CFR Part 11, ASTM E2208 referenced as voluntary best practices.
+
+## 10. Validation Strategy
+
+- **CV repeatability:** Run the same cardiac cycle recording multiple times, compare tracked displacements
+- **Controllability:** One-way ANOVA across different BPM settings
+- Simple, defensible statistical methods preferred over complex automated analysis
+
+## 11. What NOT to Build (with rationale)
+
+| Item | Rationale |
+|------|-----------|
+| Dense optical flow on leaflet surface | Uniform white silicone has no texture — near-zero eigenvalues, unreliable flow |
+| Deep learning / CNN | No GPU, Colab adds complexity, unnecessary given boundary contrast |
+| Dot tracking / fiducial markers | ID assignment drift between frames |
+| Spiderweb / HoughLinesP | Bubble noise + 3D deformation break line detection |
+| Bidirectional Arduino control | Requires firmware modification |
+| Standalone executable | PyInstaller/cx_Freeze — out of scope |
+| MapAnything integration | Deferred |
+| CI/CD pipeline | Deferred |
+
+## 12. Build State
+
+| Module | Status | Notes |
+|--------|--------|-------|
+| Serial reader | ✅ Done | Reads 7 fields at 31250 baud |
+| Graph panel | ✅ Done | Real-time P1/P2/Flow/HR plots |
+| Camera panel | ✅ Done | Dual Basler feeds displayed |
+| Control bar | ✅ Done | Connect/disconnect, record, port selection |
+| Data recorder | ✅ Done | CSV recording with t=0 reset |
+| Run logger | ✅ Done | Run quality logging |
+| Plot dialog | ✅ Done | In-app visualization |
+| Mock data | ✅ Done | Arduino + camera mocks |
+| Setup scripts | ✅ Done | setup.sh/bat, run.sh/bat, hash-check for deps |
+| Dense flow exploration | 🔨 In Progress | `tools/flow_explore.py` — needs recorded AVI |
+| Leaflet tracker | ⬜ Not Started | `src/core/leaflet_tracker.py` — after exploration |
+| Leaflet tracking UI | ⬜ Not Started | Point overlay, displacement plots |
+| Stereo calibration | ⬜ Not Started | Phase 2 stretch goal |
