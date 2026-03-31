@@ -2,8 +2,10 @@
 
 import time
 import logging
+from pathlib import Path
 from typing import Optional
 
+import cv2
 from PySide6.QtCore import QThread, Signal
 
 try:
@@ -25,6 +27,7 @@ class BaslerCamera(QThread):
     frame_ready = Signal(dict)
     connection_changed = Signal(bool)
     error_occurred = Signal(str)
+    recording_finished = Signal(str)  # emits output path when done
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -34,6 +37,12 @@ class BaslerCamera(QThread):
         self.target_fps = 30
         self.exposure_us = 25000
         self._frame_count = 0
+        # Recording state
+        self._writer: Optional[cv2.VideoWriter] = None
+        self._record_path: Optional[Path] = None
+        self._record_fps: float = 60.0
+        self._record_max_frames: int = 0
+        self._record_frame_count: int = 0
 
     @staticmethod
     def list_cameras() -> list[str]:
@@ -89,7 +98,67 @@ class BaslerCamera(QThread):
         except Exception as e:
             logger.warning(f"Could not configure camera: {e}")
 
+    def start_recording(self, output_path: Path, duration_sec: float = 10.0,
+                        fps: float = 60.0) -> None:
+        """Begin writing grabbed frames to an AVI file.
+
+        Recording happens inside the existing grab loop — no second
+        camera connection needed.
+        """
+        if self._writer is not None:
+            logger.warning("Already recording — stop first")
+            return
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._record_path = output_path
+        self._record_fps = fps
+        self._record_max_frames = int(duration_sec * fps)
+        self._record_frame_count = 0
+        # Writer is created on the first frame (need dimensions)
+        self._writer = None  # sentinel — _write_frame handles creation
+        logger.info(f"Recording armed: {output_path} "
+                    f"({duration_sec}s @ {fps}fps)")
+
+    def stop_recording(self) -> None:
+        """Stop an in-progress recording."""
+        if self._writer is not None:
+            self._writer.release()
+            logger.info(f"Recording saved: {self._record_path} "
+                        f"({self._record_frame_count} frames)")
+            self.recording_finished.emit(str(self._record_path))
+        self._writer = None
+        self._record_path = None
+        self._record_frame_count = 0
+        self._record_max_frames = 0
+
+    def _write_frame(self, frame) -> None:
+        """Write a single frame to the AVI if recording is active."""
+        if self._record_path is None:
+            return
+        # Lazy-create writer on first frame so we know dimensions
+        if self._writer is None:
+            h, w = frame.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            is_color = frame.ndim == 3
+            self._writer = cv2.VideoWriter(
+                str(self._record_path), fourcc, self._record_fps,
+                (w, h), isColor=is_color)
+            if not self._writer.isOpened():
+                logger.error(f"Cannot open VideoWriter for {self._record_path}")
+                self._record_path = None
+                self._writer = None
+                return
+            logger.info(f"Recording started: {w}x{h} → {self._record_path}")
+
+        self._writer.write(frame)
+        self._record_frame_count += 1
+        if self._record_frame_count % 60 == 0:
+            logger.info(f"  Recorded {self._record_frame_count}/"
+                        f"{self._record_max_frames} frames")
+        if 0 < self._record_max_frames <= self._record_frame_count:
+            self.stop_recording()
+
     def disconnect(self) -> None:
+        self.stop_recording()
         self.stop()
         if self._camera:
             try:
@@ -125,6 +194,7 @@ class BaslerCamera(QThread):
                         frame = grab.Array.copy()
                         grab.Release()
                         self._frame_count += 1
+                        self._write_frame(frame)
                         self.frame_ready.emit({
                             "timestamp": ts,
                             "frame": frame,

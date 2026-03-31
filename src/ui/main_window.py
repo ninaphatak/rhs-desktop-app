@@ -1,6 +1,10 @@
 """Main application window for RHS Monitor."""
 
 import logging
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
@@ -16,7 +20,12 @@ logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     """Top-level window: graphs + cameras + control bar."""
 
-    def __init__(self, mock: bool = False, parent=None) -> None:
+    def __init__(self, mock: bool = False,
+                 record_camera: Optional[int] = None,
+                 record_duration: float = 10.0,
+                 record_fps: float = 60.0,
+                 record_output: Optional[str] = None,
+                 parent=None) -> None:
         super().__init__(parent)
         self._mock = mock
         self.setWindowTitle("RHS Monitor")
@@ -53,6 +62,17 @@ class MainWindow(QMainWindow):
         self._serial_reader: SerialReader | None = None
         self._mock_arduino = None
         self._start_serial()
+
+        # -- Auto-start AVI recording if requested --
+        if record_camera is not None:
+            if record_output:
+                filename = record_output if record_output.endswith(".avi") else record_output + ".avi"
+            else:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"valve_cam{record_camera}_{ts}.avi"
+            output_path = Path(__file__).resolve().parent.parent.parent / "outputs" / filename
+            self._camera_panel.start_recording(
+                record_camera, output_path, record_duration, record_fps)
 
     # ------------------------------------------------------------------
     # Recording

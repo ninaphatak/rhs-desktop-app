@@ -1,6 +1,7 @@
 """Dual camera feed panel — two QLabel frames side by side."""
 
 import logging
+from pathlib import Path
 
 import numpy as np
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSizePolicy
@@ -107,6 +108,24 @@ class CameraPanel(QWidget):
         y = (scaled.height() - label_h) // 2
         cropped = scaled.copy(x, y, label_w, label_h)
         label.setPixmap(cropped)
+
+    def start_recording(self, camera_index: int, output_path: Path,
+                        duration_sec: float = 10.0, fps: float = 60.0) -> None:
+        """Start AVI recording on the specified camera.
+
+        If the requested FPS exceeds the camera's current target_fps,
+        the camera frame rate is bumped to match so the AVI isn't
+        under-sampled.
+        """
+        cam = self._left_camera if camera_index == 0 else self._right_camera
+        if cam is None:
+            logger.error(f"Camera {camera_index} not connected — cannot record")
+            return
+        if fps > cam.target_fps:
+            cam.target_fps = fps
+            cam._configure()
+            logger.info(f"Camera {camera_index} FPS raised to {fps} for recording")
+        cam.start_recording(output_path, duration_sec, fps)
 
     def stop_cameras(self) -> None:
         """Stop all camera threads."""
