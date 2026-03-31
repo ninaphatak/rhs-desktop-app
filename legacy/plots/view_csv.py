@@ -10,8 +10,17 @@ else:
 
 df = pd.read_csv(filepath)
 
-# Create 3 subplots like the real-time viewer
-fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
+# Optional time range filter
+t_min = df['Time (s)'].min()
+t_max = df['Time (s)'].max()
+print(f"Time range in file: {t_min:.1f}s – {t_max:.1f}s")
+range_input = input("Enter time range as 'start end' (e.g. '3000 4000'), or press Enter to plot all: ").strip()
+if range_input:
+    t_start, t_end = map(float, range_input.split())
+    df = df[(df['Time (s)'] >= t_start) & (df['Time (s)'] <= t_end)]
+
+# Create 4 subplots like the real-time viewer + temperature
+fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
 
 # Pressure plot (P1 and P2)
 ax1.plot(df['Time (s)'], df['Pressure 1 (mmHg)'], 'r-', label='P1 (Atrium)')
@@ -29,9 +38,19 @@ ax2.grid(True, alpha=0.3)
 # Heart rate plot
 ax3.plot(df['Time (s)'], df['Heart Rate (BPM)'], 'purple', label='Heart Rate')
 ax3.set_ylabel('Heart Rate (BPM)')
-ax3.set_xlabel('Time (s)')
 ax3.legend()
 ax3.grid(True, alpha=0.3)
+
+# Temperature plot
+temp_cols = [c for c in df.columns if 'Temperature' in c]
+colors = ['orange', 'red', 'cyan', 'magenta']
+for col, color in zip(temp_cols, colors):
+    ax4.plot(df['Time (s)'], df[col], color=color, label=col.replace(' (°C)', ''))
+ax4.set_ylabel('Temperature (°C)')
+ax4.set_xlabel('Time (s)')
+ax4.set_ylim(25, 39)
+ax4.legend()
+ax4.grid(True, alpha=0.3)
 
 plt.suptitle(filepath.split('/')[-1])
 plt.tight_layout()
