@@ -9,6 +9,7 @@ Usage:
     python tools/record_valve.py --duration 5       # 5 seconds
     python tools/record_valve.py --output my_clip   # Custom filename
     python tools/record_valve.py --fps 60           # Override FPS (default 60)
+    python tools/record_valve.py --preview            # Play back after recording
     python tools/record_valve.py --list              # List connected cameras
 """
 
@@ -143,6 +144,57 @@ def record(camera_index: int, duration_sec: float, fps: float,
     print(f"Saved: {output_path} ({file_size_mb:.1f} MB)")
 
 
+def preview(video_path: Path, fps: float) -> None:
+    """Play back a recorded AVI. SPACE=pause, RIGHT=step, q=quit."""
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        print(f"ERROR: Cannot open {video_path} for preview.")
+        return
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frame_delay = int(1000 / fps)
+    frame_num = 0
+    paused = False
+
+    print(f"\nPreview: {video_path.name} ({total_frames} frames)")
+    print("Controls: SPACE=play/pause  RIGHT=step  q=quit")
+
+    while True:
+        if not paused:
+            ret, frame = cap.read()
+            if not ret:
+                print("End of video.")
+                paused = True
+                continue
+            frame_num += 1
+            # Frame counter overlay
+            display = frame if len(frame.shape) == 3 else cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+            cv2.putText(display, f"Frame {frame_num}/{total_frames}",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.imshow("Preview", display)
+            key = cv2.waitKey(frame_delay) & 0xFF
+        else:
+            key = cv2.waitKey(0) & 0xFF
+
+        if key == ord('q'):
+            break
+        elif key == ord(' '):
+            paused = not paused
+        elif paused and key in (83, ord('d')):  # RIGHT ARROW
+            ret, frame = cap.read()
+            if not ret:
+                print("End of video.")
+                continue
+            frame_num += 1
+            display = frame if len(frame.shape) == 3 else cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+            cv2.putText(display, f"Frame {frame_num}/{total_frames}",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.imshow("Preview", display)
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Record a short AVI from a Basler camera.")
@@ -154,6 +206,8 @@ def main() -> None:
                         help="Target frame rate (default: 60)")
     parser.add_argument("--output", type=str, default=None,
                         help="Output filename (without extension)")
+    parser.add_argument("--preview", action="store_true",
+                        help="Play back recording after capture")
     parser.add_argument("--list", action="store_true",
                         help="List connected cameras and exit")
     args = parser.parse_args()
@@ -178,6 +232,9 @@ def main() -> None:
     output_path.parent.mkdir(exist_ok=True)
 
     record(args.camera, args.duration, args.fps, output_path)
+
+    if args.preview:
+        preview(output_path, args.fps)
 
 
 if __name__ == "__main__":
