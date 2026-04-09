@@ -149,6 +149,7 @@ class BaslerCamera(QThread):
         except Exception as e:
             self.error_occurred.emit(f"Grab error: {e}")
         finally:
+            self._release_writer()
             if self._camera and self._camera.IsGrabbing():
                 self._camera.StopGrabbing()
 
@@ -158,6 +159,8 @@ class BaslerCamera(QThread):
         self._running = False
         if self.isRunning():
             self.wait(2000)
+        # If thread wasn't running (e.g. never started), release here
+        self._release_writer()
 
     @property
     def is_connected(self) -> bool:
@@ -188,14 +191,23 @@ class BaslerCamera(QThread):
         logger.info(f"Camera recording started: {output_path}")
 
     def stop_recording(self) -> None:
-        """Stop recording and release the VideoWriter."""
+        """Stop recording. Safe to call from any thread.
+
+        Sets the recording flag to False so the grab loop stops writing.
+        The VideoWriter is released in _release_writer(), which must be
+        called from the same thread that writes (the QThread's run loop).
+        """
         if not self._is_recording:
             return
         self._is_recording = False
+        logger.info("Camera recording stopping")
+
+    def _release_writer(self) -> None:
+        """Release the VideoWriter. Must be called from the grab thread."""
         if self._video_writer:
             self._video_writer.release()
             self._video_writer = None
-        logger.info("Camera recording stopped")
+            logger.info("Camera recording stopped")
 
     def _write_frame(self, frame: "np.ndarray") -> None:
         """Write a single frame to the video file if recording."""

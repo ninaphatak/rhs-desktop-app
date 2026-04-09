@@ -19,6 +19,7 @@ class TestBaslerCameraRecording:
         cam.start_recording(str(output_path))
         assert cam.is_recording is True
         cam.stop_recording()
+        cam._release_writer()
 
     def test_stop_recording_clears_state(self, tmp_path: Path) -> None:
         """stop_recording should set is_recording=False."""
@@ -49,5 +50,6 @@ class TestBaslerCameraRecording:
         frame = np.zeros((480, 640), dtype=np.uint8)
         cam._write_frame(frame)
         cam.stop_recording()
+        cam._release_writer()
         assert output_path.exists()
         assert output_path.stat().st_size > 0
