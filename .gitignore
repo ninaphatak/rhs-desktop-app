@@ -23,6 +23,9 @@ ENV/
 # Output data (CSV recordings + run log)
 outputs/*
 !outputs/.gitkeep
+!outputs/videos/
+outputs/videos/*
+!outputs/videos/.gitkeep
 
 # Video files
 *.avi
