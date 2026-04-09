@@ -46,4 +46,5 @@ CAMERA_EXPOSURE_US = 25000
 # Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+VIDEOS_DIR = OUTPUTS_DIR / "videos"
 RUN_LOG_PATH = OUTPUTS_DIR / "run_log.csv"

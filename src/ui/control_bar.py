@@ -1,16 +1,17 @@
-"""Control bar widget: Record, Stop, Plot, Log buttons + status label."""
+"""Control bar widget: Record, Stop, Plot, Log, Review buttons + status labels."""
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel
 from PySide6.QtCore import Signal
 
 
 class ControlBar(QWidget):
-    """Horizontal bar with action buttons and a status label."""
+    """Horizontal bar with action buttons and status labels."""
 
     record_clicked = Signal()
     stop_clicked = Signal()
     plot_clicked = Signal()
     log_clicked = Signal()
+    review_clicked = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -21,6 +22,7 @@ class ControlBar(QWidget):
         self._stop_btn = QPushButton("Stop")
         self._plot_btn = QPushButton("Plot")
         self._log_btn = QPushButton("Log")
+        self._review_btn = QPushButton("Review")
 
         self._stop_btn.setEnabled(False)
 
@@ -37,27 +39,32 @@ class ControlBar(QWidget):
             QPushButton:pressed { background-color: #555; }
             QPushButton:disabled { color: #666; background-color: #2a2a2a; }
         """
-        for btn in [self._record_btn, self._stop_btn, self._plot_btn, self._log_btn]:
+        for btn in [self._record_btn, self._stop_btn, self._plot_btn,
+                     self._log_btn, self._review_btn]:
             btn.setStyleSheet(btn_style)
             layout.addWidget(btn)
 
-        # Solenoid control (disabled — requires firmware update)
-        self._start_rhs_btn = QPushButton("Start RHS")
-        self._start_rhs_btn.setEnabled(False)
-        self._start_rhs_btn.setToolTip("Requires firmware update — see docs/solenoid_protocol.md")
-        self._start_rhs_btn.setStyleSheet(btn_style)
-        layout.addWidget(self._start_rhs_btn)
+        # Status labels (stacked vertically)
+        status_layout = QVBoxLayout()
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(0)
 
-        # Spacer + status
         self._status = QLabel("Not recording")
         self._status.setStyleSheet("color: #aaa; font-size: 13px; margin-left: 12px;")
-        layout.addWidget(self._status, stretch=1)
+        status_layout.addWidget(self._status)
+
+        self._camera_status = QLabel("")
+        self._camera_status.setStyleSheet("color: #ff4444; font-size: 13px; margin-left: 12px;")
+        status_layout.addWidget(self._camera_status)
+
+        layout.addLayout(status_layout, stretch=1)
 
         # Connect signals
         self._record_btn.clicked.connect(self.record_clicked)
         self._stop_btn.clicked.connect(self.stop_clicked)
         self._plot_btn.clicked.connect(self.plot_clicked)
         self._log_btn.clicked.connect(self.log_clicked)
+        self._review_btn.clicked.connect(self.review_clicked)
 
     def set_recording(self, filename: str) -> None:
         """Update UI to recording state."""
@@ -72,3 +79,11 @@ class ControlBar(QWidget):
         self._stop_btn.setEnabled(False)
         self._status.setText("Not recording")
         self._status.setStyleSheet("color: #aaa; font-size: 13px; margin-left: 12px;")
+        self.set_camera_recording(False)
+
+    def set_camera_recording(self, active: bool) -> None:
+        """Show or hide the camera recording status label."""
+        if active:
+            self._camera_status.setText("Cameras recording")
+        else:
+            self._camera_status.setText("")
