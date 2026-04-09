@@ -108,6 +108,35 @@ class CameraPanel(QWidget):
         cropped = scaled.copy(x, y, label_w, label_h)
         label.setPixmap(cropped)
 
+    @property
+    def both_cameras_connected(self) -> bool:
+        """Return True if both cameras are connected and running."""
+        return (
+            self._left_camera is not None
+            and self._left_camera.is_connected
+            and self._right_camera is not None
+            and self._right_camera.is_connected
+        )
+
+    def start_recording(self, cam1_path: str, cam2_path: str) -> None:
+        """Start recording on both cameras.
+
+        Args:
+            cam1_path: Output path for camera 1 (left) AVI.
+            cam2_path: Output path for camera 2 (right) AVI.
+        """
+        if self._left_camera:
+            self._left_camera.start_recording(cam1_path)
+        if self._right_camera:
+            self._right_camera.start_recording(cam2_path)
+
+    def stop_recording(self) -> None:
+        """Stop recording on both cameras."""
+        if self._left_camera:
+            self._left_camera.stop_recording()
+        if self._right_camera:
+            self._right_camera.stop_recording()
+
     def stop_cameras(self) -> None:
         """Stop all camera threads."""
         if self._left_camera:
