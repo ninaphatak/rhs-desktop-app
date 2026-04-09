@@ -16,7 +16,7 @@ const int SPin = 13;
 // Declare sensor limits
 const float SRMax = 921.6;
 const float SRMin = 102.4;
-const int PTMax = 5;
+const int PTMax = 10;
 const int FRMax = 50;
 const int FRMin = 2;
 // Set baudRate and conversions
@@ -27,7 +27,7 @@ const float mL = 16.6667;
 float PT1 = 0.0;
 float PT2 = 0.0;
 int FR = 0;
-int BPM = 130;
+int BPM = 80;
 int readDelay = 0;
 // Declare temperature variables
 float VT1 = 0.0;

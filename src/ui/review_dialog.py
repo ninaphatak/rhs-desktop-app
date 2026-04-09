@@ -382,6 +382,13 @@ class ReviewDialog(QDialog):
         if "Atrium Temperature (C)" in col.columns:
             self._at1_curve.setData(t, col["Atrium Temperature (C)"].values)
 
+        # Disable Y auto-range so scroll-wheel zoom on Y axes persists
+        # (X range is controlled by the sliding 5s window in _update_display)
+        for plot in self._plots:
+            plot.enableAutoRange(axis="x", enable=False)
+            plot.enableAutoRange(axis="y", enable=False)
+            plot.setAutoVisible(y=True)
+
     # ------------------------------------------------------------------
     # Display update (single method syncs everything)
     # ------------------------------------------------------------------
