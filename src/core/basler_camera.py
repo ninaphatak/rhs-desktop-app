@@ -4,6 +4,9 @@ import time
 import logging
 from typing import Optional
 
+import cv2
+import numpy as np
+
 from PySide6.QtCore import QThread, Signal
 
 try:
@@ -34,6 +37,9 @@ class BaslerCamera(QThread):
         self.target_fps = 30
         self.exposure_us = 25000
         self._frame_count = 0
+        self._video_writer: Optional[cv2.VideoWriter] = None
+        self._is_recording = False
+        self._last_frame_size: Optional[tuple[int, int]] = None
 
     @staticmethod
     def list_cameras() -> list[str]:
@@ -124,6 +130,8 @@ class BaslerCamera(QThread):
                         ts = time.time()
                         frame = grab.Array.copy()
                         grab.Release()
+                        self._last_frame_size = (frame.shape[1], frame.shape[0])
+                        self._write_frame(frame)
                         self._frame_count += 1
                         self.frame_ready.emit({
                             "timestamp": ts,
@@ -145,6 +153,8 @@ class BaslerCamera(QThread):
                 self._camera.StopGrabbing()
 
     def stop(self) -> None:
+        """Stop grabbing frames and finalize any active recording."""
+        self.stop_recording()
         self._running = False
         if self.isRunning():
             self.wait(2000)
@@ -152,3 +162,43 @@ class BaslerCamera(QThread):
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    @property
+    def is_recording(self) -> bool:
+        """Return True if a video recording is currently active."""
+        return self._is_recording
+
+    def start_recording(self, output_path: str) -> None:
+        """Start recording frames to an AVI file (MJPG codec).
+
+        Args:
+            output_path: Full path for the output .avi file.
+
+        Raises:
+            ValueError: If no frame size is known yet (no frames grabbed).
+        """
+        if self._is_recording:
+            self.stop_recording()
+        if self._last_frame_size is None:
+            raise ValueError("Cannot start recording: frame size unknown (no frames grabbed yet)")
+        w, h = self._last_frame_size
+        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+        self._video_writer = cv2.VideoWriter(output_path, fourcc, self.target_fps, (w, h), isColor=False)
+        self._is_recording = True
+        logger.info(f"Camera recording started: {output_path}")
+
+    def stop_recording(self) -> None:
+        """Stop recording and release the VideoWriter."""
+        if not self._is_recording:
+            return
+        self._is_recording = False
+        if self._video_writer:
+            self._video_writer.release()
+            self._video_writer = None
+        logger.info("Camera recording stopped")
+
+    def _write_frame(self, frame: "np.ndarray") -> None:
+        """Write a single frame to the video file if recording."""
+        if not self._is_recording or self._video_writer is None:
+            return
+        self._video_writer.write(frame)
