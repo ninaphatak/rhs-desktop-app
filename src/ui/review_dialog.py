@@ -431,25 +431,17 @@ class ReviewDialog(QDialog):
 
         pixmap = QPixmap.fromImage(qimg)
 
-        # Scale-to-fill matching CameraPanel's crop-to-fill behavior
         label_w, label_h = label.width(), label.height()
         if label_w <= 0 or label_h <= 0:
             label.setPixmap(pixmap)
             return
 
-        scale_w = label_w / pixmap.width()
-        scale_h = label_h / pixmap.height()
-        scale = max(scale_w, scale_h)
         scaled = pixmap.scaled(
-            int(pixmap.width() * scale),
-            int(pixmap.height() * scale),
+            label_w, label_h,
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+            Qt.TransformationMode.FastTransformation,
         )
-        x = (scaled.width() - label_w) // 2
-        y = (scaled.height() - label_h) // 2
-        cropped = scaled.copy(x, y, label_w, label_h)
-        label.setPixmap(cropped)
+        label.setPixmap(scaled)
 
     # ------------------------------------------------------------------
     # Transport controls
