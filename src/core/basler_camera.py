@@ -186,7 +186,7 @@ class BaslerCamera(QThread):
             raise ValueError("Cannot start recording: frame size unknown (no frames grabbed yet)")
         w, h = self._last_frame_size
         fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        self._video_writer = cv2.VideoWriter(output_path, fourcc, self.target_fps, (w, h), isColor=False)
+        self._video_writer = cv2.VideoWriter(output_path, fourcc, self.target_fps, (w, h), isColor=True)
         self._is_recording = True
         logger.info(f"Camera recording started: {output_path}")
 
@@ -210,7 +210,13 @@ class BaslerCamera(QThread):
             logger.info("Camera recording stopped")
 
     def _write_frame(self, frame: "np.ndarray") -> None:
-        """Write a single frame to the video file if recording."""
+        """Write a single frame to the video file if recording.
+
+        MJPG on macOS requires BGR input — grayscale frames cause corrupt
+        output ('overread', 'error count' warnings).  Convert before writing.
+        """
         if not self._is_recording or self._video_writer is None:
             return
+        if frame.ndim == 2:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
         self._video_writer.write(frame)
