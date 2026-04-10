@@ -204,7 +204,7 @@ void loop() {
         unsigned long iterStart = millis();
 
         readPressure();
-        FR = calculateFlowRate(phaseDuration);
+        FR = calculateFlowRate(150);
         printSerial();
 
         unsigned long iterElapsed = millis() - iterStart;
@@ -219,7 +219,7 @@ void loop() {
         unsigned long iterStart = millis();
 
         readPressure();
-        FR = calculateFlowRate(phaseDuration);
+        FR = calculateFlowRate(150);
         printSerial();
 
         unsigned long iterElapsed = millis() - iterStart;
