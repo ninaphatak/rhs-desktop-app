@@ -1,7 +1,7 @@
 """Control bar widget: Record, Stop, Plot, Log, Review buttons + status labels."""
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QTimer, QElapsedTimer
 
 
 class ControlBar(QWidget):
@@ -59,6 +59,19 @@ class ControlBar(QWidget):
 
         layout.addLayout(status_layout, stretch=1)
 
+        # Stopwatch label
+        self._stopwatch_label = QLabel("")
+        self._stopwatch_label.setStyleSheet(
+            "color: #ff4444; font-size: 14px; font-family: monospace; margin-right: 8px;"
+        )
+        layout.addWidget(self._stopwatch_label)
+
+        # Stopwatch timer (fires every 1s to update the label)
+        self._elapsed_timer = QElapsedTimer()
+        self._stopwatch_tick = QTimer(self)
+        self._stopwatch_tick.setInterval(1000)
+        self._stopwatch_tick.timeout.connect(self._update_stopwatch)
+
         # Connect signals
         self._record_btn.clicked.connect(self.record_clicked)
         self._stop_btn.clicked.connect(self.stop_clicked)
@@ -72,6 +85,9 @@ class ControlBar(QWidget):
         self._stop_btn.setEnabled(True)
         self._status.setText(f"Recording: {filename}")
         self._status.setStyleSheet("color: #ff4444; font-size: 13px; margin-left: 12px;")
+        self._elapsed_timer.start()
+        self._stopwatch_label.setText("00:00:00")
+        self._stopwatch_tick.start()
 
     def set_stopped(self) -> None:
         """Update UI to idle state."""
@@ -79,6 +95,8 @@ class ControlBar(QWidget):
         self._stop_btn.setEnabled(False)
         self._status.setText("Not recording")
         self._status.setStyleSheet("color: #aaa; font-size: 13px; margin-left: 12px;")
+        self._stopwatch_tick.stop()
+        self._stopwatch_label.setText("")
         self.set_camera_recording(False)
 
     def set_camera_recording(self, active: bool) -> None:
@@ -87,3 +105,11 @@ class ControlBar(QWidget):
             self._camera_status.setText("Cameras recording")
         else:
             self._camera_status.setText("")
+
+    def _update_stopwatch(self) -> None:
+        """Update the stopwatch label from the elapsed timer."""
+        total_secs = self._elapsed_timer.elapsed() // 1000
+        h = total_secs // 3600
+        m = (total_secs % 3600) // 60
+        s = total_secs % 60
+        self._stopwatch_label.setText(f"{h:02d}:{m:02d}:{s:02d}")
