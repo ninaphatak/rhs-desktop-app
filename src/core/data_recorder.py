@@ -20,6 +20,7 @@ class DataRecorder:
         self._recording = False
         self._record_start: float | None = None
         self._current_path: Path | None = None
+        self._lap: int = 1
 
     @property
     def is_recording(self) -> bool:
@@ -50,6 +51,7 @@ class DataRecorder:
         self._writer.writerow(CSV_HEADERS)
 
         self._record_start = None
+        self._lap = 1
         self._recording = True
         logger.info(f"Recording started: {filename}")
         return filename
@@ -79,5 +81,10 @@ class DataRecorder:
             self._record_start = data["timestamp"]
 
         t = round(data["timestamp"] - self._record_start, 4)
-        row = [t] + [data.get(field, 0.0) for field in SERIAL_FIELDS]
+        row = [t] + [data.get(field, 0.0) for field in SERIAL_FIELDS] + [self._lap]
         self._writer.writerow(row)
+
+    def advance_lap(self) -> int:
+        """Advance to the next lap. Returns the new lap number."""
+        self._lap += 1
+        return self._lap

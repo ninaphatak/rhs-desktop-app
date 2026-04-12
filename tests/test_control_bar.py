@@ -46,9 +46,9 @@ class TestControlBar:
         assert bar._camera_status.text() == ""
 
     def test_button_order(self) -> None:
-        """Buttons should appear in order: Record, Stop, Plot, Log, Review."""
+        """Buttons should appear in order: Record, Stop, Lap, Plot, Log, Review."""
         bar = ControlBar()
         layout = bar.layout()
         widgets = [layout.itemAt(i).widget() for i in range(layout.count()) if layout.itemAt(i).widget()]
         button_texts = [w.text() for w in widgets if isinstance(w, QPushButton)]
-        assert button_texts == ["Record", "Stop", "Plot", "Log", "Review"]
+        assert button_texts == ["Record", "Stop", "Lap", "Plot", "Log", "Review"]

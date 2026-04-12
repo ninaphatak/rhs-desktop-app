@@ -87,6 +87,23 @@ if n == 1:
 for ax, key in zip(axes, panels):
     panel_map[key](ax, t)
 
+# Highlight lap regions if Lap column exists and has multiple laps
+if 'Lap' in df.columns and df['Lap'].nunique() > 1:
+    lap_colors = plt.cm.tab10.colors
+    for lap_num in sorted(df['Lap'].unique()):
+        lap_data = df[df['Lap'] == lap_num]
+        t_start = lap_data['Time (s)'].iloc[0]
+        t_end = lap_data['Time (s)'].iloc[-1]
+        color = lap_colors[int((lap_num - 1) % len(lap_colors))]
+        for ax in axes:
+            ax.axvspan(t_start, t_end, alpha=0.05, color=color)
+        # Label the lap on the top axes
+        axes[0].text(
+            (t_start + t_end) / 2, axes[0].get_ylim()[1],
+            f'Lap {lap_num}', ha='center', va='bottom',
+            fontsize=9, color=color, fontweight='bold',
+        )
+
 axes[-1].set_xlabel('Time (s)')
 plt.suptitle(filepath.split('/')[-1])
 plt.tight_layout()
