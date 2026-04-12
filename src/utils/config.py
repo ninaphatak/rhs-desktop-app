@@ -22,6 +22,7 @@ CSV_HEADERS = [
     "Ventricle Temperature 1 (C)",
     "Ventricle Temperature 2 (C)",
     "Atrium Temperature (C)",
+    "Lap",
 ]
 
 # Graph configuration

@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         # Wire control bar signals
         self._control_bar.record_clicked.connect(self._on_record)
         self._control_bar.stop_clicked.connect(self._on_stop)
+        self._control_bar.lap_clicked.connect(self._on_lap)
         self._control_bar.plot_clicked.connect(self._on_plot)
         self._control_bar.log_clicked.connect(self._on_log)
         self._control_bar.review_clicked.connect(self._on_review)
@@ -88,6 +89,11 @@ class MainWindow(QMainWindow):
         self._data_recorder.stop_recording()
         self._camera_panel.stop_recording()
         self._control_bar.set_stopped()
+
+    def _on_lap(self) -> None:
+        """Advance the lap counter in the CSV and update the display."""
+        new_lap = self._data_recorder.advance_lap()
+        self._control_bar.set_lap(new_lap)
 
     def _on_review(self) -> None:
         from src.ui.review_dialog import ReviewDialog

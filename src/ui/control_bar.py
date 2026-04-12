@@ -9,6 +9,7 @@ class ControlBar(QWidget):
 
     record_clicked = Signal()
     stop_clicked = Signal()
+    lap_clicked = Signal()
     plot_clicked = Signal()
     log_clicked = Signal()
     review_clicked = Signal()
@@ -20,11 +21,13 @@ class ControlBar(QWidget):
 
         self._record_btn = QPushButton("Record")
         self._stop_btn = QPushButton("Stop")
+        self._lap_btn = QPushButton("Lap")
         self._plot_btn = QPushButton("Plot")
         self._log_btn = QPushButton("Log")
         self._review_btn = QPushButton("Review")
 
         self._stop_btn.setEnabled(False)
+        self._lap_btn.setEnabled(False)
 
         btn_style = """
             QPushButton {
@@ -39,8 +42,8 @@ class ControlBar(QWidget):
             QPushButton:pressed { background-color: #555; }
             QPushButton:disabled { color: #666; background-color: #2a2a2a; }
         """
-        for btn in [self._record_btn, self._stop_btn, self._plot_btn,
-                     self._log_btn, self._review_btn]:
+        for btn in [self._record_btn, self._stop_btn, self._lap_btn,
+                     self._plot_btn, self._log_btn, self._review_btn]:
             btn.setStyleSheet(btn_style)
             layout.addWidget(btn)
 
@@ -59,6 +62,13 @@ class ControlBar(QWidget):
 
         layout.addLayout(status_layout, stretch=1)
 
+        # Lap label (e.g. "Lap 1 @ 00:00:00")
+        self._lap_label = QLabel("")
+        self._lap_label.setStyleSheet(
+            "color: #aaa; font-size: 13px; font-family: monospace; margin-right: 12px;"
+        )
+        layout.addWidget(self._lap_label)
+
         # Stopwatch label
         self._stopwatch_label = QLabel("")
         self._stopwatch_label.setStyleSheet(
@@ -71,10 +81,12 @@ class ControlBar(QWidget):
         self._stopwatch_tick = QTimer(self)
         self._stopwatch_tick.setInterval(1000)
         self._stopwatch_tick.timeout.connect(self._update_stopwatch)
+        self._current_lap: int = 1
 
         # Connect signals
         self._record_btn.clicked.connect(self.record_clicked)
         self._stop_btn.clicked.connect(self.stop_clicked)
+        self._lap_btn.clicked.connect(self.lap_clicked)
         self._plot_btn.clicked.connect(self.plot_clicked)
         self._log_btn.clicked.connect(self.log_clicked)
         self._review_btn.clicked.connect(self.review_clicked)
@@ -85,8 +97,11 @@ class ControlBar(QWidget):
         self._stop_btn.setEnabled(True)
         self._status.setText(f"Recording: {filename}")
         self._status.setStyleSheet("color: #ff4444; font-size: 13px; margin-left: 12px;")
+        self._lap_btn.setEnabled(True)
+        self._current_lap = 1
         self._elapsed_timer.start()
         self._stopwatch_label.setText("00:00:00")
+        self._lap_label.setText("Lap 1 @ 00:00:00")
         self._stopwatch_tick.start()
 
     def set_stopped(self) -> None:
@@ -95,9 +110,20 @@ class ControlBar(QWidget):
         self._stop_btn.setEnabled(False)
         self._status.setText("Not recording")
         self._status.setStyleSheet("color: #aaa; font-size: 13px; margin-left: 12px;")
+        self._lap_btn.setEnabled(False)
         self._stopwatch_tick.stop()
         self._stopwatch_label.setText("")
+        self._lap_label.setText("")
         self.set_camera_recording(False)
+
+    def set_lap(self, lap_number: int) -> None:
+        """Update the lap display to show the new lap and its start time."""
+        self._current_lap = lap_number
+        total_secs = self._elapsed_timer.elapsed() // 1000
+        h = total_secs // 3600
+        m = (total_secs % 3600) // 60
+        s = total_secs % 60
+        self._lap_label.setText(f"Lap {lap_number} @ {h:02d}:{m:02d}:{s:02d}")
 
     def set_camera_recording(self, active: bool) -> None:
         """Show or hide the camera recording status label."""
