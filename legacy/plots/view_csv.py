@@ -68,11 +68,15 @@ print("  5) Temperature only")
 group_input = input("Enter number [1]: ").strip() or "1"
 group = GROUPS.get(group_input, "all")
 
-# Ask whether to show peak/trough value labels on the flow plot
+# Ask whether to run peak/trough analysis on the flow plot
+show_peak_analysis = False
 show_value_labels = False
 if group in ("all", "flow"):
-    label_input = input("Show peak & trough value labels on flow plot? (y/N): ").strip().lower()
-    show_value_labels = label_input == 'y'
+    analysis_input = input("Run peak/trough analysis on flow plot? (y/N): ").strip().lower()
+    show_peak_analysis = analysis_input == 'y'
+    if show_peak_analysis:
+        label_input = input("  Label peak & trough values on plot? (y/N): ").strip().lower()
+        show_value_labels = label_input == 'y'
 
 # Optional custom plot title
 custom_title = input("Enter plot title (or press Enter for filename): ").strip()
@@ -162,45 +166,55 @@ def plot_flow(ax: plt.Axes, t: pd.Series) -> None:
     flow = df['Flow Rate (mL/s)']
     ax.plot(t, flow, 'g-', label='Flow Rate')
 
-    # --- Peak / trough analysis ---
-    peak_t, peak_v, trough_t, trough_v = find_flow_peaks_and_troughs(t, flow)
+    # --- Peak / trough analysis (only if user opted in) ---
+    if show_peak_analysis:
+        peak_t, peak_v, trough_t, trough_v = find_flow_peaks_and_troughs(t, flow)
 
-    # Mark peaks and troughs on the plot
-    ax.plot(peak_t, peak_v, 'rv', markersize=10)
-    if len(trough_t):
-        ax.plot(trough_t, trough_v, 'b^', markersize=8)
+        # Mark peaks and troughs on the plot
+        ax.plot(peak_t, peak_v, 'rv', markersize=10)
+        if len(trough_t):
+            ax.plot(trough_t, trough_v, 'b^', markersize=8)
 
-    # Label each peak/trough with its value (if user opted in)
-    if show_value_labels:
-        for pt, pv in zip(peak_t, peak_v):
-            ax.annotate(f'{pv:.1f}', xy=(pt, pv), xytext=(0, 8),
-                        textcoords='offset points', ha='center', fontsize=7,
-                        color='red', fontweight='bold')
-        for tt, tv in zip(trough_t, trough_v):
-            ax.annotate(f'{tv:.1f}', xy=(tt, tv), xytext=(0, -12),
-                        textcoords='offset points', ha='center', fontsize=7,
-                        color='blue', fontweight='bold')
+        # Label each peak/trough with its value (if user opted in)
+        if show_value_labels:
+            for pt, pv in zip(peak_t, peak_v):
+                ax.annotate(f'{pv:.1f}', xy=(pt, pv), xytext=(0, 8),
+                            textcoords='offset points', ha='center', fontsize=7,
+                            color='red', fontweight='bold')
+            for tt, tv in zip(trough_t, trough_v):
+                ax.annotate(f'{tv:.1f}', xy=(tt, tv), xytext=(0, -12),
+                            textcoords='offset points', ha='center', fontsize=7,
+                            color='blue', fontweight='bold')
 
-    # Compute statistics
-    peak_cv = compute_cv(peak_v)
-    trough_cv = compute_cv(trough_v)
-    if len(peak_t) >= 2:
-        inter_peak = np.diff(peak_t)
-        mean_period = np.mean(inter_peak)
-        cv_period = compute_cv(inter_peak)
-    else:
-        inter_peak = np.array([])
-        mean_period = 0.0
-        cv_period = 0.0
+        # Compute statistics
+        peak_cv = compute_cv(peak_v)
+        trough_cv = compute_cv(trough_v)
+        if len(peak_t) >= 2:
+            inter_peak = np.diff(peak_t)
+            mean_period = np.mean(inter_peak)
+            cv_period = compute_cv(inter_peak)
+        else:
+            mean_period = 0.0
+            cv_period = 0.0
 
-    # Store stats for display below the figure (set by plot_flow, read after plotting)
-    ax._flow_stats = {
-        'peak_cv': peak_cv, 'trough_cv': trough_cv,
-        'mean_period': mean_period, 'cv_period': cv_period,
-        'n_peaks': len(peak_v), 'n_troughs': len(trough_v),
-        'peak_mean': np.mean(peak_v) if len(peak_v) else 0,
-        'trough_mean': np.mean(trough_v) if len(trough_v) else 0,
-    }
+        # Peak-to-nearby-peak time: for each peak, time to the next peak
+        if len(peak_t) >= 3:
+            peak_to_peak_times = np.diff(peak_t)
+            cv_p2p_time = compute_cv(peak_to_peak_times)
+            mean_p2p_time = np.mean(peak_to_peak_times)
+        else:
+            cv_p2p_time = 0.0
+            mean_p2p_time = mean_period
+
+        # Store stats for display below the figure
+        ax._flow_stats = {
+            'peak_cv': peak_cv, 'trough_cv': trough_cv,
+            'mean_period': mean_period, 'cv_period': cv_period,
+            'mean_p2p_time': mean_p2p_time, 'cv_p2p_time': cv_p2p_time,
+            'n_peaks': len(peak_v), 'n_troughs': len(trough_v),
+            'peak_mean': np.mean(peak_v) if len(peak_v) else 0,
+            'trough_mean': np.mean(trough_v) if len(trough_v) else 0,
+        }
 
     ax.set_ylabel('Flow Rate (mL/s)')
     ax.legend(loc='upper right')
@@ -289,7 +303,7 @@ if flow_stats:
     stats_text = (
         f"Peaks (n={s['n_peaks']}): mean={s['peak_mean']:.2f} mL/s, CV={s['peak_cv']:.1f}%    "
         f"Troughs (n={s['n_troughs']}): mean={s['trough_mean']:.2f} mL/s, CV={s['trough_cv']:.1f}%    "
-        f"Peak-to-peak: mean={s['mean_period']:.3f}s, CV={s['cv_period']:.1f}%"
+        f"Peak-to-peak time: mean={s['mean_p2p_time']:.3f}s, CV={s['cv_p2p_time']:.1f}%"
     )
     fig.subplots_adjust(bottom=0.12)
     fig.text(0.5, 0.01, stats_text, ha='center', va='bottom',
