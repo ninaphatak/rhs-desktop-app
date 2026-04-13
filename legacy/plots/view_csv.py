@@ -171,9 +171,9 @@ def plot_flow(ax: plt.Axes, t: pd.Series) -> None:
         peak_t, peak_v, trough_t, trough_v = find_flow_peaks_and_troughs(t, flow)
 
         # Mark peaks and troughs on the plot
-        ax.plot(peak_t, peak_v, 'rv', markersize=10)
+        ax.plot(peak_t, peak_v, 'ro', markersize=7)
         if len(trough_t):
-            ax.plot(trough_t, trough_v, 'b^', markersize=8)
+            ax.plot(trough_t, trough_v, 'bo', markersize=7)
 
         # Label each peak/trough with its value (if user opted in)
         if show_value_labels:
