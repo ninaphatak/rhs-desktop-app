@@ -89,18 +89,31 @@ for ax, key in zip(axes, panels):
 
 # Highlight lap regions if Lap column exists and has multiple laps
 if 'Lap' in df.columns and df['Lap'].nunique() > 1:
+    lap_nums = sorted(df['Lap'].unique())
+
+    # Ask user if they want to rename any lap labels
+    print(f"\nLaps found: {', '.join(f'Lap {n}' for n in lap_nums)}")
+    rename_input = input("Rename lap labels? (y/N): ").strip().lower()
+    lap_labels: dict[int, str] = {}
+    if rename_input == 'y':
+        for lap_num in lap_nums:
+            custom = input(f"  Replace 'Lap {lap_num}' as (press Enter to keep): ").strip()
+            lap_labels[lap_num] = custom if custom else f'Lap {lap_num}'
+    else:
+        lap_labels = {n: f'Lap {n}' for n in lap_nums}
+
     lap_colors = plt.cm.tab10.colors
-    for lap_num in sorted(df['Lap'].unique()):
+    for lap_num in lap_nums:
         lap_data = df[df['Lap'] == lap_num]
         t_start = lap_data['Time (s)'].iloc[0]
         t_end = lap_data['Time (s)'].iloc[-1]
         color = lap_colors[int((lap_num - 1) % len(lap_colors))]
         for ax in axes:
-            ax.axvspan(t_start, t_end, alpha=0.05, color=color)
+            ax.axvspan(t_start, t_end, alpha=0.1, color=color)
         # Label the lap on the top axes
         axes[0].text(
             (t_start + t_end) / 2, axes[0].get_ylim()[1],
-            f'Lap {lap_num}', ha='center', va='bottom',
+            lap_labels[lap_num], ha='center', va='bottom',
             fontsize=9, color=color, fontweight='bold',
         )
 
