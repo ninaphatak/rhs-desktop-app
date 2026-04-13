@@ -10,7 +10,7 @@ Standalone script that compares flow rate consistency across multiple recorded t
 ## Behavior
 
 1. **Input:** Folder path via CLI argument or interactive prompt.
-2. **Discovery:** Finds all `*.csv` files in that folder, sorted alphabetically.
+2. **Discovery:** Finds all `*.csv` files in that folder, sorted alphabetically. Exits with an error message if fewer than 2 CSVs are found.
 3. **Trial naming:** Prompts user to name each trial. If declined, defaults to `1, 2, 3...`.
 4. **Analysis per CSV:**
    - Reads `Time (s)` and `Flow Rate (mL/s)` columns.
