@@ -303,7 +303,7 @@ if flow_stats:
     stats_text = (
         f"Peaks (n={s['n_peaks']}): mean={s['peak_mean']:.2f} mL/s, CV={s['peak_cv']:.1f}%    "
         f"Troughs (n={s['n_troughs']}): mean={s['trough_mean']:.2f} mL/s, CV={s['trough_cv']:.1f}%    "
-        f"Peak-to-peak time: mean={s['mean_p2p_time']:.3f}s, CV={s['cv_p2p_time']:.1f}%"
+        f"Peak-to-peak time: mean={s['mean_p2p_time']:.3f}s ({60/s['mean_p2p_time']:.0f} BPM), CV={s['cv_p2p_time']:.1f}%"
     )
     fig.subplots_adjust(bottom=0.12)
     fig.text(0.5, 0.01, stats_text, ha='center', va='bottom',
