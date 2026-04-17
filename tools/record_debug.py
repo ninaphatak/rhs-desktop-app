@@ -515,6 +515,7 @@ def test_h264_pipeline(camera_index: int, duration_s: float,
     interval = 1.0 / target_fps
 
     t0 = time.time()
+    t_grab_end = t0  # default in case try aborts before loop completes
     try:
         while time.time() - t0 < duration_s:
             t_g = time.time()
@@ -544,6 +545,8 @@ def test_h264_pipeline(camera_index: int, duration_s: float,
                     time.sleep(remain)
             elif grab:
                 grab.Release()
+        # Capture grab-loop end before ffmpeg finalization skews elapsed.
+        t_grab_end = time.time()
     finally:
         cam.StopGrabbing()
         cam.Close()
@@ -562,7 +565,8 @@ def test_h264_pipeline(camera_index: int, duration_s: float,
         print(f"WARN: ffmpeg exit {proc.returncode}. stderr tail:\n"
               f"{err[-600:]}")
 
-    elapsed = time.time() - t0
+    elapsed = t_grab_end - t0  # grab-loop only
+    finalize_s = time.time() - t_grab_end
     real_fps = frames / elapsed if elapsed > 0 else 0.0
 
     drops = 0
@@ -576,9 +580,10 @@ def test_h264_pipeline(camera_index: int, duration_s: float,
 
     _kv("Output", out.relative_to(REPO_ROOT))
     _kv("ffmpeg binary", ffmpeg_exe)
-    _kv("Wall-clock elapsed", f"{elapsed:.2f}s")
+    _kv("Grab-loop elapsed", f"{elapsed:.2f}s  "
+                              f"(ffmpeg finalize: {finalize_s:.2f}s)")
     _kv("Frames piped", frames)
-    _kv("Wall-clock fps", f"{real_fps:.2f}")
+    _kv("Wall-clock fps (grab-loop)", f"{real_fps:.2f}")
     _kv("Camera-side drops (BlockID gaps)", drops)
     if grab_ms:
         _kv("Per-grab ms (mean / p95 / max)",
@@ -793,15 +798,23 @@ def main() -> None:
     # H.264 tests run before the class test because the class test has a
     # known race that can segfault — don't want to lose H.264 numbers to it.
     if args.test in ("all", "h264"):
-        # Scenario J: H.264 CRF 18 (visually lossless archival default) at best config
+        # preset=fast baseline (reference — quick but bloated streams)
         test_h264_pipeline(args.camera, args.duration,
-                           target_fps=60, exposure_us=10000, crf=18)
-        # Scenario K: H.264 CRF 15 (near-mathematically-lossless) — quality upper bound
+                           target_fps=60, exposure_us=10000, crf=18,
+                           preset="fast")
+        # preset=medium (libx264 default — 20-30% smaller files vs fast)
         test_h264_pipeline(args.camera, args.duration,
-                           target_fps=60, exposure_us=10000, crf=15)
-        # Scenario L: H.264 CRF 18 at the app's current default (30fps / 25ms)
+                           target_fps=60, exposure_us=10000, crf=18,
+                           preset="medium")
+        # preset=slow (another 10-15% smaller vs medium at higher CPU cost)
         test_h264_pipeline(args.camera, args.duration,
-                           target_fps=30, exposure_us=25000, crf=18)
+                           target_fps=60, exposure_us=10000, crf=18,
+                           preset="slow")
+        # Redo the problem scenario (30fps/25ms — MJPG was 293 KB/frame)
+        # with preset=medium to see if H.264 finally beats MJPG there
+        test_h264_pipeline(args.camera, args.duration,
+                           target_fps=30, exposure_us=25000, crf=18,
+                           preset="medium")
 
     if args.test in ("all", "class"):
         # Scenario H: exactly the class bug hypothesis
