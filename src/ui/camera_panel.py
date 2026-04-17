@@ -111,10 +111,10 @@ class CameraPanel(QWidget):
 
     def start_recording(self, camera_index: int, output_path: Path,
                         duration_sec: float = 10.0, fps: float = 60.0) -> None:
-        """Start AVI recording on the specified camera.
+        """Start H.264/MP4 recording on the specified camera.
 
         If the requested FPS exceeds the camera's current target_fps,
-        the camera frame rate is bumped to match so the AVI isn't
+        the camera frame rate is bumped to match so the MP4 isn't
         under-sampled.
         """
         cam = self._left_camera if camera_index == 0 else self._right_camera

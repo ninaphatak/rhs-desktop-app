@@ -63,13 +63,14 @@ class MainWindow(QMainWindow):
         self._mock_arduino = None
         self._start_serial()
 
-        # -- Auto-start AVI recording if requested --
+        # -- Auto-start MP4 recording if requested --
         if record_camera is not None:
             if record_output:
-                filename = record_output if record_output.endswith(".avi") else record_output + ".avi"
+                filename = (record_output if record_output.endswith(".mp4")
+                            else record_output + ".mp4")
             else:
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"valve_cam{record_camera}_{ts}.avi"
+                filename = f"valve_cam{record_camera}_{ts}.mp4"
             output_path = Path(__file__).resolve().parent.parent.parent / "outputs" / filename
             self._camera_panel.start_recording(
                 record_camera, output_path, record_duration, record_fps)
