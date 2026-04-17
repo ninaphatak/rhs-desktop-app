@@ -9,17 +9,20 @@ Layers probed:
     3. Write loop         — MJPG write latency, does it block the grab?
     4. File on disk       — metadata fps vs. real frame count, bytes/frame
     5. BaslerCamera class — reproduce the target_fps / record_fps mismatch
+    6. H.264 pipeline     — pipe frames to bundled ffmpeg (imageio-ffmpeg),
+                            compare file size + encode latency vs MJPG
 
 Each test prints its own section, and a summary table appears at the end.
-Output AVIs go to outputs/debug/ so they are isolated from real recordings.
+Output files go to outputs/debug/ so they are isolated from real recordings.
 
 Usage:
-    python tools/record_debug.py                      # run everything (~60s)
+    python tools/record_debug.py                      # run everything (~90s)
     python tools/record_debug.py --duration 3         # shorter runs
     python tools/record_debug.py --test info          # camera probe only
     python tools/record_debug.py --test grab          # grab-only scenarios
     python tools/record_debug.py --test write         # grab + MJPG write
     python tools/record_debug.py --test class         # BaslerCamera class path
+    python tools/record_debug.py --test h264          # grab + H.264 via ffmpeg
     python tools/record_debug.py --camera 1           # use second camera
 """
 
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import statistics
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -42,6 +46,12 @@ try:
 except ImportError:
     print("ERROR: pypylon not installed.")
     sys.exit(1)
+
+try:
+    import imageio_ffmpeg
+    IMAGEIO_FFMPEG_AVAILABLE = True
+except ImportError:
+    IMAGEIO_FFMPEG_AVAILABLE = False
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -437,6 +447,172 @@ def test_full_pipeline(camera_index: int, duration_s: float,
 
 
 # ---------------------------------------------------------------------------
+# Test 3b: H.264 pipeline via imageio-ffmpeg (bundled ffmpeg, cross-OS)
+# ---------------------------------------------------------------------------
+
+def test_h264_pipeline(camera_index: int, duration_s: float,
+                       target_fps: float, exposure_us: int,
+                       crf: int = 18, preset: str = "fast") -> None:
+    """Grab + pipe raw frames to ffmpeg (libx264) via stdin.
+
+    Compares H.264 encode latency and file size to the MJPG pipeline.
+    Uses imageio_ffmpeg.get_ffmpeg_exe() so the test works on macOS/Windows
+    without a system ffmpeg install.
+    """
+    if not IMAGEIO_FFMPEG_AVAILABLE:
+        print("SKIP: imageio-ffmpeg not installed. "
+              "Run: pip install imageio-ffmpeg")
+        return
+
+    scenario = (f"h264 crf={crf} preset={preset} camFps={target_fps:g} "
+                f"exp={exposure_us/1000:g}ms")
+    _hr(f"TEST 3b — {scenario}")
+
+    DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%H%M%S")
+    out = DEBUG_DIR / f"probe_h264_crf{crf}_{int(target_fps)}fps_{stamp}.mp4"
+
+    cam = _open_camera(camera_index)
+    _configure(cam, exposure_us, target_fps)
+
+    cam.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+    first = cam.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
+    if not first.GrabSucceeded():
+        print("ERROR: first frame grab failed")
+        cam.Close()
+        return
+    frame0 = first.Array.copy()
+    first.Release()
+    h, w = frame0.shape[:2]
+    is_mono = frame0.ndim == 2
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    cmd = [
+        ffmpeg_exe,
+        "-y",                                  # overwrite
+        "-hide_banner", "-loglevel", "error",  # quiet but keep errors
+        "-f", "rawvideo",                      # input is raw pixels
+        "-pix_fmt", "gray" if is_mono else "bgr24",
+        "-s", f"{w}x{h}",
+        "-r", f"{target_fps:g}",               # input fps
+        "-i", "-",                             # read from stdin
+        "-c:v", "libx264",
+        "-preset", preset,
+        "-crf", str(crf),
+        "-pix_fmt", "yuv420p",                 # playback-compatible output
+        str(out),
+    ]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+
+    # Pipe first frame
+    t_w = time.time()
+    proc.stdin.write(frame0.tobytes())
+    write_ms: list[float] = [(time.time() - t_w) * 1000]
+    grab_ms: list[float] = []
+    block_ids: list[int] = []
+    frames = 1
+    interval = 1.0 / target_fps
+
+    t0 = time.time()
+    try:
+        while time.time() - t0 < duration_s:
+            t_g = time.time()
+            timeout_ms = int(exposure_us / 1000) + 1000
+            grab = cam.RetrieveResult(timeout_ms, pylon.TimeoutHandling_Return)
+            if grab and grab.GrabSucceeded():
+                try:
+                    block_ids.append(int(grab.GetBlockID()))
+                except Exception:
+                    pass
+                frame = grab.Array  # tobytes() copies, no need to .copy()
+                grab.Release()
+                grab_ms.append((time.time() - t_g) * 1000)
+
+                t_w = time.time()
+                try:
+                    proc.stdin.write(frame.tobytes())
+                except BrokenPipeError:
+                    err = proc.stderr.read().decode(errors="replace")
+                    print(f"ERROR: ffmpeg stdin closed. stderr:\n{err}")
+                    break
+                write_ms.append((time.time() - t_w) * 1000)
+                frames += 1
+
+                remain = interval - (time.time() - t_g)
+                if remain > 0:
+                    time.sleep(remain)
+            elif grab:
+                grab.Release()
+    finally:
+        cam.StopGrabbing()
+        cam.Close()
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            print("WARN: ffmpeg wouldn't finalize in 30s — killed")
+
+    if proc.returncode not in (0, None):
+        err = proc.stderr.read().decode(errors="replace")
+        print(f"WARN: ffmpeg exit {proc.returncode}. stderr tail:\n"
+              f"{err[-600:]}")
+
+    elapsed = time.time() - t0
+    real_fps = frames / elapsed if elapsed > 0 else 0.0
+
+    drops = 0
+    if len(block_ids) >= 2:
+        for a, b in zip(block_ids, block_ids[1:]):
+            if b > a + 1:
+                drops += (b - a - 1)
+
+    file_frames, file_meta_fps, file_mb = _read_back(out)
+    bpf_kb = (file_mb * 1024 / file_frames) if file_frames else 0.0
+
+    _kv("Output", out.relative_to(REPO_ROOT))
+    _kv("ffmpeg binary", ffmpeg_exe)
+    _kv("Wall-clock elapsed", f"{elapsed:.2f}s")
+    _kv("Frames piped", frames)
+    _kv("Wall-clock fps", f"{real_fps:.2f}")
+    _kv("Camera-side drops (BlockID gaps)", drops)
+    if grab_ms:
+        _kv("Per-grab ms (mean / p95 / max)",
+            f"{statistics.mean(grab_ms):.2f} / "
+            f"{_pctl(grab_ms, 95):.2f} / {max(grab_ms):.2f}")
+    if write_ms:
+        _kv("Per-pipe-write ms (mean / p95 / max)",
+            f"{statistics.mean(write_ms):.2f} / "
+            f"{_pctl(write_ms, 95):.2f} / {max(write_ms):.2f}")
+    _kv("File fps metadata", f"{file_meta_fps:.2f}")
+    _kv("File frame count (readback)", file_frames)
+    _kv("File size", f"{file_mb:.2f} MB  ({bpf_kb:.1f} KB/frame)")
+
+    RESULTS.append(TestResult(
+        label="h264",
+        scenario=scenario,
+        target_fps=target_fps,
+        exposure_ms=exposure_us / 1000,
+        grab_fps=real_fps,
+        write_fps=real_fps,
+        camera_drops=drops,
+        grab_ms_mean=statistics.mean(grab_ms) if grab_ms else 0.0,
+        grab_ms_p95=_pctl(grab_ms, 95),
+        write_ms_mean=statistics.mean(write_ms) if write_ms else 0.0,
+        write_ms_p95=_pctl(write_ms, 95),
+        file_fps_meta=file_meta_fps,
+        file_frames=file_frames,
+        file_mb=file_mb,
+        bytes_per_frame_kb=bpf_kb,
+        notes=f"crf={crf} preset={preset}",
+    ))
+
+
+# ---------------------------------------------------------------------------
 # Test 4: BaslerCamera class path (reproduces the target_fps/record_fps bug)
 # ---------------------------------------------------------------------------
 
@@ -579,7 +755,7 @@ def main() -> None:
     ap.add_argument("--duration", type=float, default=5.0,
                     help="seconds per recording test (default: 5)")
     ap.add_argument("--test",
-                    choices=["all", "info", "grab", "write", "class"],
+                    choices=["all", "info", "grab", "write", "class", "h264"],
                     default="all")
     args = ap.parse_args()
 
@@ -613,6 +789,19 @@ def main() -> None:
         # Scenario G: lower exposure + matched 60 — can the whole pipeline keep up?
         test_full_pipeline(args.camera, args.duration,
                            target_fps=60, exposure_us=10000)
+
+    # H.264 tests run before the class test because the class test has a
+    # known race that can segfault — don't want to lose H.264 numbers to it.
+    if args.test in ("all", "h264"):
+        # Scenario J: H.264 CRF 18 (visually lossless archival default) at best config
+        test_h264_pipeline(args.camera, args.duration,
+                           target_fps=60, exposure_us=10000, crf=18)
+        # Scenario K: H.264 CRF 15 (near-mathematically-lossless) — quality upper bound
+        test_h264_pipeline(args.camera, args.duration,
+                           target_fps=60, exposure_us=10000, crf=15)
+        # Scenario L: H.264 CRF 18 at the app's current default (30fps / 25ms)
+        test_h264_pipeline(args.camera, args.duration,
+                           target_fps=30, exposure_us=25000, crf=18)
 
     if args.test in ("all", "class"):
         # Scenario H: exactly the class bug hypothesis

@@ -14,5 +14,6 @@ dependencies:
     - pyserial>=3.5
     - pypylon>=3.0.0
     - opencv-python>=4.8.0
+    - imageio-ffmpeg>=0.4.9
     - QT-PyQt-PySide-Custom-Widgets>=0.8.0
     - pytest>=7.0.0
