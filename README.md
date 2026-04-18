@@ -76,4 +76,4 @@ legacy/                # Archived old code (serial_reader.py, plots, old src/)
 
 ## Team
 
-UC Riverside Bioengineering Senior Design — BIEN 175B (Winter 2026)
+UC Riverside Bioengineering Senior Design; sponsored by Dr. Lee @ [Biomechanics & Biomaterials Design Laboratory (BBDL)](https://bbdl.engr.ucr.edu/) — BIEN 175 (2025 - 2026)
