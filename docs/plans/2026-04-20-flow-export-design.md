@@ -15,7 +15,23 @@ A standalone CLI tool that ingests an MP4 valve recording from either Basler cam
 
 - Not integrating into `src/core/` as a live tracker. If the pipeline proves useful, integration is a future task.
 - No stereo reconstruction, no metric (mm) conversion, no depth estimation.
-- No parameter tuning UI — Farneback params are hardcoded for reproducibility.
+- No parameter tuning UI — Farneback params are hardcoded for reproducibility in the core exporter. Parameter *sensitivity* is analyzed separately in the validation phase (see §Reconstruction Validation below).
+- No trained ML model. The annotation set produced in validation is input to a future downstream model, not one we train here.
+
+## Reconstruction validation (added after exporter ships)
+
+The exporter alone produces a dataset. To make the senior design deliverable a proper research contribution — rather than just "a data pipeline" — we add a parameter-sensitivity study that validates the pipeline recovers observable valve motion.
+
+**"Reconstruction" here means motion reconstruction, not 3D geometry reconstruction.** Specifically:
+
+1. **Temporal reconstruction**: flow-derived "valve open-ness" (mean flow magnitude in donut ROI, or total motion-mask area per frame) vs the Arduino FLOW sensor signal. No annotation needed — Arduino CSV is the ground truth. Metric: Pearson r, peak-timing offset in ms.
+2. **Spatial reconstruction**: for a small hand-annotated frame set (target 30-50 frames spanning open/closed/transition phases), compare flow-derived leaflet contours against hand-drawn leaflet boundaries. Metrics: IoU per frame, centroid distance, contour-to-contour mean distance.
+
+**Parameter sweep design:** 2-3 parameters, 3 values each, 9-27 total runs. Primary candidates: `winsize ∈ {15, 21, 31}`, `flow_threshold_px ∈ {1.0, 1.5, 2.0}`, `donut_outer_frac ∈ {1.2, 1.3, 1.4}`. Each parameter set gets re-exported (same MP4, different HDF5) and metrics computed. Output: a heatmap of IoU and Arduino-correlation across the parameter grid, plus time-series overlays for the winning setting.
+
+**Annotation tooling:** Lightweight custom tool (`tools/annotate_leaflets.py`) that steps through frames, lets the user draw polygon leaflet boundaries with click-to-add-vertex + enter-to-close, saves to a sidecar JSON next to the HDF5. Avoid CVAT/Label Studio — overkill for 30-50 frames, adds install/hosting friction. Expect ~1 min per annotated frame.
+
+**Why this matters for the project framing:** Without validation, the pitch is "I built a data pipeline." With it, the pitch is "I validated an optical flow pipeline for tricuspid valve motion tracking, with parameter-sensitivity analysis and hand-annotated ground truth." That's a legitimate undergrad research deliverable. It is also what a downstream CNN trainer would need anyway (an annotated set is the training data).
 
 ## Key design decisions
 
@@ -106,11 +122,17 @@ with h5py.File("session.h5", "r") as f:
 
 ## Files changed
 
-**New:**
+**New (core exporter):**
 - `tools/flow_export.py` — CLI entry point
 - `tools/_flow_io.py` — shared I/O helpers (loader used by tests and downstream users)
 - `tools/README_DATASET.md` — handoff README
 - `tests/test_flow_export.py` — pytest tests
+
+**New (validation phase):**
+- `tools/annotate_leaflets.py` — lightweight polygon annotator, saves per-frame JSON
+- `tools/param_sweep.py` — batch-run `flow_export` across a parameter grid, compute metrics, write summary CSV
+- `tools/validation_report.py` — generate IoU/correlation heatmap + time-series overlays
+- `docs/validation_results.md` — one-page results writeup for Dr. Lee
 
 **Modified:**
 - `environment.yml` — add `h5py`

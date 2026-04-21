@@ -76,6 +76,12 @@ pytest tests/ -v       # Run tests
 - Phase 0 validation: correlate donut-ROI mean flow magnitude vs Arduino FLOW channel. Gate the build on r² ≥ 0.5.
 - New recordings from both cameras scheduled (valve cycling with motion).
 
+**Planned (after exporter ships):**
+- `tools/annotate_leaflets.py` — lightweight polygon annotator (~30-50 frames).
+- `tools/param_sweep.py` + `tools/_metrics.py` — parameter grid (winsize × threshold × donut) run across the same video, metrics computed per run.
+- `tools/validation_report.py` — produces IoU/Arduino-correlation heatmaps + `docs/validation_results.md`.
+- This validation study turns the deliverable from "data pipeline" into "validated optical flow pipeline with parameter-sensitivity analysis" — the research framing for Dr. Lee. **"Reconstruction" here = motion reconstruction (flow vs Arduino sensor, flow-derived contours vs annotations), NOT 3D/SfM.**
+
 **Deprecated but retained for reference:**
 - `tools/leaflet_flow_test.py` — LK prototype. Keep in repo; do not extend.
 - `src/core/leaflet_tracker.py` — never created; removed from the roadmap.

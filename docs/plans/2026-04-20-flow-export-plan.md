@@ -249,6 +249,109 @@ Do NOT test Farneback's numerical output — trust OpenCV.
 
 ---
 
+## Task 9: Annotation tool — `tools/annotate_leaflets.py`
+
+**Ships AFTER the core exporter is working and a dataset exists.**
+
+**Files:**
+- New: `tools/annotate_leaflets.py`
+
+**Behavior:**
+- CLI: `python tools/annotate_leaflets.py <session.h5> [--output leaflet_annotations.json]`
+- Loads frames from the HDF5 dataset.
+- Displays one frame at a time in an OpenCV window.
+- Mouse: left-click adds a polygon vertex; `ENTER` closes the current polygon and starts a new one; `N` moves to next frame; `P` to previous; `U` undoes last vertex; `S` saves; `Q` quits.
+- Sampling: by default, shows every Nth frame such that 30-50 frames span the video. User can override with `--every-n-frames`.
+- Output JSON schema:
+  ```json
+  {
+    "source_h5": "session.h5",
+    "created_utc": "...",
+    "annotations": {
+      "00100": [[[x1,y1],[x2,y2],...], [[...]]],   // list of polygons per frame
+      "00250": [...],
+      ...
+    }
+  }
+  ```
+- Keep it under 200 lines. No external deps beyond `cv2, numpy, json`.
+
+**Tests:** 1-2 cases. Construct a synthetic annotation dict and assert it round-trips through save/load. Do NOT test the GUI.
+
+---
+
+## Task 10: Parameter sweep — `tools/param_sweep.py`
+
+**Files:**
+- New: `tools/param_sweep.py`
+
+**Behavior:**
+- CLI: `python tools/param_sweep.py <video.mp4> --camera {0deg,30deg} --grid <grid.json>`
+- `grid.json` schema:
+  ```json
+  {
+    "winsize": [15, 21, 31],
+    "flow_threshold_px": [1.0, 1.5, 2.0],
+    "donut_outer_frac": [1.2, 1.3, 1.4]
+  }
+  ```
+- For each parameter combination (Cartesian product, default 27 runs):
+  - Re-runs the exporter with that parameter set.
+  - Writes output to `sweeps/<param_hash>/session.h5`.
+  - Computes metrics against annotations + Arduino CSV.
+  - Appends a row to `sweeps/summary.csv`:
+    `param_hash, winsize, threshold, donut_outer, mean_iou, arduino_pearson_r, median_centroid_err_px`
+- Reuses `export_video` from `tools/flow_export.py` but accepts an override-params dict. This means Task 2 needs to accept an optional `params_override: dict | None` argument — adjust during Task 2 or add a thin wrapper here.
+
+**Expected runtime:** 27 runs × 30-60s per run ≈ 15-30 min on a 60s input video. Acceptable.
+
+**Tests:** parameter-grid expansion logic (turn grid.json into list of param dicts). Do NOT test the full sweep in pytest.
+
+---
+
+## Task 11: Metrics module — `tools/_metrics.py`
+
+**Files:**
+- New: `tools/_metrics.py` (shared between `param_sweep.py` and `validation_report.py`)
+
+**Functions:**
+```python
+def polygon_iou(poly_a: np.ndarray, poly_b: np.ndarray, frame_shape: tuple[int, int]) -> float:
+    """Rasterize both polygons into binary masks (via cv2.fillPoly), compute IoU."""
+
+def centroid_distance(poly_a: np.ndarray, poly_b: np.ndarray) -> float:
+    """Euclidean distance between polygon centroids (from cv2.moments)."""
+
+def arduino_flow_correlation(
+    flow_time_series: np.ndarray,
+    flow_timestamps: np.ndarray,
+    csv_path: Path,
+) -> tuple[float, float]:
+    """Interpolate Arduino FLOW onto flow timestamps, return (pearson_r, peak_offset_ms)."""
+```
+
+**Tests:** 3-5 cases. IoU on identical polygons = 1.0. IoU on disjoint polygons = 0.0. Centroid distance on known polygons. Correlation on synthetic in-phase / anti-phase signals.
+
+---
+
+## Task 12: Validation report — `tools/validation_report.py`
+
+**Files:**
+- New: `tools/validation_report.py`
+- New: `docs/validation_results.md` (writeup)
+
+**Behavior:**
+- Reads `sweeps/summary.csv`.
+- Produces three figures using matplotlib, saved to `sweeps/figures/`:
+  1. Heatmap: mean IoU across parameter grid (2D projection, fix one param).
+  2. Heatmap: Arduino Pearson r across parameter grid.
+  3. Time-series overlay: flow-derived valve-open signal vs Arduino FLOW, for the winning parameter set.
+- Writes `docs/validation_results.md`: 1 page. Sections: setup, parameter grid, winning settings, headline metrics, caveats, figures.
+
+No tests. Pure scripting + plotting.
+
+---
+
 ## Task 8: Docs
 
 **Files:**
@@ -262,6 +365,8 @@ Do NOT test Farneback's numerical output — trust OpenCV.
 
 ## Build sequence summary
 
+**Core exporter (weekend 1):**
+
 | Phase | Tasks | Gate |
 |---|---|---|
 | 0 | Validation spike (Task 0) | r² ≥ 0.5 vs Arduino FLOW |
@@ -269,6 +374,14 @@ Do NOT test Farneback's numerical output — trust OpenCV.
 | 2 | HDF5 writer (Task 3) + CLI (Task 4) | `session.h5` loads in REPL |
 | 3 | Tests (Task 5) + env/README (Task 6) | `pytest tests/ -v` green |
 | 4 | Real-data tuning (Task 7) | Visual QA on mask frames |
-| 5 | Docs (Task 8) | PRD + CLAUDE.md reflect current state |
 
-Each phase is one commit.
+**Validation study (weekend 2, after core is stable and a dataset exists):**
+
+| Phase | Tasks | Gate |
+|---|---|---|
+| 5 | Annotation tool (Task 9) | 30-50 frames annotated on one session |
+| 6 | Metrics (Task 11) + param sweep (Task 10) | `sweeps/summary.csv` populated |
+| 7 | Validation report (Task 12) | `docs/validation_results.md` + figures committed |
+| 8 | Docs (Task 8) | PRD + CLAUDE.md reflect current state |
+
+Each phase is one commit. Phases 5-7 are the deliverable that turns this from "data pipeline" into "validated optical flow pipeline" — the research framing for Dr. Lee.
