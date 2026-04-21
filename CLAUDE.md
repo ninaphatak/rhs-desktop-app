@@ -3,7 +3,7 @@
 A PySide6 desktop app for the Right Heart Simulator (RHS) — a cardiovascular medical training device simulating post-Fontan hemodynamics. RHS = Right Heart Simulator.
 
 ## What This App Does
-Unified GUI for: Arduino sensor monitoring (P1, P2, Flow, HR, VT1, VT2, AT1), on-demand CSV recording, in-app data visualization, run quality logging, dual Basler camera feeds, and **leaflet boundary tracking** via computer vision. **This is a read-only sensor monitoring app.**
+Unified GUI for: Arduino sensor monitoring (P1, P2, Flow, HR, VT1, VT2, AT1), on-demand CSV recording, in-app data visualization, run quality logging, and dual Basler camera feeds. Computer vision work is offline — standalone tools in `tools/` produce an **HDF5 optical-flow dataset** for handoff to researchers downstream. **This is a read-only sensor monitoring app.**
 
 > See `docs/PRD.md` for product requirements, CV pipeline design, and current build state.
 
@@ -20,7 +20,7 @@ pytest tests/ -v       # Run tests
 
 ## Project Structure
 - `src/main.py` — App entry point (QApplication + MainWindow)
-- `src/core/` — Business logic: serial_reader, basler_camera, data_recorder, run_logger, leaflet_tracker
+- `src/core/` — Business logic: serial_reader, basler_camera, data_recorder, run_logger
 - `src/ui/` — PySide6 widgets: main_window, graph_panel, camera_panel, control_bar, plot_dialog, log_dialog
 - `src/utils/` — Config constants, port detection
 - `tests/` — pytest tests + mock hardware + `cv_frames/` (static valve frames for CV dev)
@@ -58,26 +58,29 @@ pytest tests/ -v       # Run tests
 
 ## CV Pipeline — Current State
 
-**Status: EXPLORATION PHASE**
+**Status: DATASET EXPORT PHASE** (pivot from in-app tracker)
 
-We are tracking **leaflet boundary displacement** using sparse Lucas-Kanade optical flow on points along the leaflet boundary (where bright leaflet meets dark opening). Orifice area is a byproduct. The camera and valve positions are fixed across sessions, meaning ROI and reference positions are one-time calibration values.
+**Approach:** Produce a structured per-frame **dense optical flow dataset** from recorded valve videos as a handoff artifact for Dr. Lee / a downstream researcher (annotation, CNN training, further analysis). No live in-app tracker. The CV work lives entirely in `tools/` — the app itself stays a read-only sensor monitor.
 
-**What's been decided:**
-- Sparse optical flow (Lucas-Kanade) on leaflet boundary points — NOT dense flow on leaflet surface
-- Primary measurement: leaflet displacement. Secondary: orifice area from tracked polygon
-- 0° camera is primary tracking camera. 30° camera is secondary (stereo is stretch goal)
-- No deep learning, no spiderweb/HoughLinesP, no dot tracking (all evaluated and rejected — see PRD.md for rationale)
+**Why the pivot:** Sparse LK on boundary points (`tools/leaflet_flow_test.py`) did not produce reliable tracks on actual footage — the textureless white silicone surface and bubble noise described in PRD §5.6 hurt LK too, not just dense-flow-on-surface. Farneback dense flow at the **orifice boundary** (donut ROI — NOT the leaflet surface interior) qualitatively tracks leaflet motion and can be packaged as a dataset.
+
+**What's decided:**
+- Dense Farneback inside a donut ROI around the orifice. Not on the textureless leaflet interior — PRD §5.6's rejection stands for the interior; regularization-propagated flow there is hallucinated.
+- Fixed absolute-magnitude threshold on saved flow fields. No `NORM_MINMAX` in saved data.
+- HDF5 handoff format. Core `session.h5` = grayscale frames + motion masks + contours + metadata. Optional `flow.h5` sidecar = raw dense flow (large).
+- Both 0° and 30° cameras supported by the same exporter (`--camera` CLI arg).
+- Hardcoded Farneback params (winsize=21, poly_n=7, poly_sigma=1.5, OPTFLOW_FARNEBACK_GAUSSIAN) + CLAHE preprocessing + morph cleanup, stamped into HDF5 attrs for reproducibility.
 
 **What's in progress:**
-- `tools/flow_explore.py` — dense Farneback flow visualization on recorded AVI to identify which pixels are reliably trackable before building the tracker
-- Need to record a 5-10 second AVI from the 0° Basler camera with the valve cycling
+- `tools/flow_export.py` — CLI exporter (to be built). See `docs/plans/2026-04-20-flow-export-plan.md`.
+- Phase 0 validation: correlate donut-ROI mean flow magnitude vs Arduino FLOW channel. Gate the build on r² ≥ 0.5.
+- New recordings from both cameras scheduled (valve cycling with motion).
 
-**What's next (after exploration):**
-- Decide point initialization strategy (manual, auto-detect, or both)
-- Build `tools/leaflet_flow_test.py` — interactive LK tracking prototype on video
-- Integrate into main app as `src/core/leaflet_tracker.py`
+**Deprecated but retained for reference:**
+- `tools/leaflet_flow_test.py` — LK prototype. Keep in repo; do not extend.
+- `src/core/leaflet_tracker.py` — never created; removed from the roadmap.
 
-> See `docs/PRD.md` for full algorithm design, OpenCV function references, parameter ranges, and implementation notes.
+> See `docs/plans/2026-04-20-flow-export-design.md` for full design rationale and `docs/PRD.md` for algorithm background and rejected alternatives.
 
 ## Testing Requirements
 Every new module or feature must have corresponding pytest tests. Run `pytest tests/ -v` before committing.
@@ -108,8 +111,9 @@ Do not push — I will review and push manually.
 - Setup: `setup.sh` (macOS/Linux) / `setup.bat` (Windows)
 
 ## What NOT to Build
-- Dense optical flow on leaflet surface (no texture — unreliable flow estimates)
-- Deep learning / CNN for segmentation (no GPU, unnecessary)
+- Dense optical flow on the **leaflet surface interior** (no texture — Farneback propagates boundary flow inward via regularization; interior values are hallucinated). Dense flow at the orifice **boundary** via a donut ROI is fine.
+- Live in-app CV tracking (`src/core/leaflet_tracker.py`) — CV work is offline, in `tools/`.
+- Deep learning / CNN for segmentation in this project (no GPU, unnecessary) — a downstream researcher may train one on the exported dataset, which is a separate workstream.
 - Dot tracking / fiducial markers (ID drift)
 - Spiderweb / HoughLinesP (bubble noise, 3D deformation)
 - Bidirectional Arduino control (firmware modification required first)
