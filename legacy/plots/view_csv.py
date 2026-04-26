@@ -78,13 +78,112 @@ if group in ("all", "flow"):
         label_input = input("  Label peak & trough values on plot? (y/N): ").strip().lower()
         show_value_labels = label_input == 'y'
 
+# Same prompt for the pressure plot. Analog signal => uses scipy.find_peaks with
+# an adaptive height threshold to ignore small baseline oscillations.
+show_pressure_peak_analysis = False
+show_pressure_value_labels = False
+if group in ("all", "pressure"):
+    analysis_input_p = input("Run peak/trough analysis on pressure plot? (y/N): ").strip().lower()
+    show_pressure_peak_analysis = analysis_input_p == 'y'
+    if show_pressure_peak_analysis:
+        label_input_p = input("  Label peak & trough values on plot? (y/N): ").strip().lower()
+        show_pressure_value_labels = label_input_p == 'y'
+
 # Optional custom plot title
 custom_title = input("Enter plot title (or press Enter for filename): ").strip()
 
+def find_pressure_peaks_and_troughs(t: pd.Series, signal: pd.Series):
+    """Detect large per-beat peaks (and intervening troughs) in an analog
+    pressure trace.
+
+    Uses scipy.signal.find_peaks with an adaptive height threshold so that
+    small baseline oscillations between beats are discarded. Each trough is
+    the minimum sample between two consecutive accepted peaks.
+    """
+    from scipy.signal import find_peaks  # lazy import; only needed here
+
+    t_arr = t.values
+    s_arr = signal.values
+    if len(s_arr) < 3:
+        return np.array([]), np.array([]), np.array([]), np.array([])
+
+    dt = float(np.median(np.diff(t_arr))) if len(t_arr) > 1 else 1.0
+    # Min 0.3 s between peaks (handles HR up to ~200 BPM without splitting beats)
+    min_dist_samples = max(1, int(round(0.3 / dt))) if dt > 0 else 1
+    # Adaptive: 40% of the per-trace max, with a 5 mmHg floor for low-amplitude runs
+    height_thresh = max(0.4 * float(np.nanmax(s_arr)), 5.0)
+
+    pk_idx, _ = find_peaks(s_arr, height=height_thresh, distance=min_dist_samples)
+    peak_t = t_arr[pk_idx]
+    peak_v = s_arr[pk_idx]
+
+    trough_t, trough_v = [], []
+    for i in range(len(pk_idx) - 1):
+        a, b = pk_idx[i], pk_idx[i + 1]
+        rel = int(np.argmin(s_arr[a:b + 1]))
+        ti = a + rel
+        trough_t.append(t_arr[ti])
+        trough_v.append(s_arr[ti])
+
+    return peak_t, peak_v, np.array(trough_t), np.array(trough_v)
+
+
+def _channel_stats(peak_v: np.ndarray, trough_v: np.ndarray) -> dict:
+    """Bundle the per-channel peak/trough stats used in the figure caption."""
+    return {
+        'n_peaks': len(peak_v),
+        'n_troughs': len(trough_v),
+        'peak_mean': float(np.mean(peak_v)) if len(peak_v) else 0.0,
+        'peak_cv': compute_cv(peak_v),
+        'trough_mean': float(np.mean(trough_v)) if len(trough_v) else 0.0,
+        'trough_cv': compute_cv(trough_v),
+    }
+
+
 # Build list of panels to show: (axes_label, plot_fn)
 def plot_pressure(ax: plt.Axes, t: pd.Series) -> None:
-    ax.plot(t, df['Pressure 1 (mmHg)'], 'r-', label='P1 (Atrium)')
-    ax.plot(t, df['Pressure 2 (mmHg)'], 'b-', label='P2 (Ventricle)')
+    p1 = df['Pressure 1 (mmHg)']
+    p2 = df['Pressure 2 (mmHg)']
+    ax.plot(t, p1, 'r-', label='P1 (Atrium)')
+    ax.plot(t, p2, 'b-', label='P2 (Ventricle)')
+
+    if show_pressure_peak_analysis:
+        p1_pk_t, p1_pk_v, p1_tr_t, p1_tr_v = find_pressure_peaks_and_troughs(t, p1)
+        p2_pk_t, p2_pk_v, p2_tr_t, p2_tr_v = find_pressure_peaks_and_troughs(t, p2)
+
+        # Gold-filled peak markers / white-filled trough markers, with the
+        # channel's line color as the edge so the user can tell which trace
+        # each marker belongs to even when they overlap.
+        ax.plot(p1_pk_t, p1_pk_v, 'o', mfc='gold',  mec='red',  mew=0.8, ms=7)
+        ax.plot(p2_pk_t, p2_pk_v, 'o', mfc='gold',  mec='blue', mew=0.8, ms=7)
+        if len(p1_tr_t):
+            ax.plot(p1_tr_t, p1_tr_v, 'o', mfc='white', mec='red',  mew=0.8, ms=7)
+        if len(p2_tr_t):
+            ax.plot(p2_tr_t, p2_tr_v, 'o', mfc='white', mec='blue', mew=0.8, ms=7)
+
+        if show_pressure_value_labels:
+            for pt, pv in zip(p1_pk_t, p1_pk_v):
+                ax.annotate(f'{pv:.1f}', xy=(pt, pv), xytext=(0, 8),
+                            textcoords='offset points', ha='center', fontsize=7,
+                            color='red', fontweight='bold')
+            for tt, tv in zip(p1_tr_t, p1_tr_v):
+                ax.annotate(f'{tv:.1f}', xy=(tt, tv), xytext=(0, -12),
+                            textcoords='offset points', ha='center', fontsize=7,
+                            color='red', fontweight='bold')
+            for pt, pv in zip(p2_pk_t, p2_pk_v):
+                ax.annotate(f'{pv:.1f}', xy=(pt, pv), xytext=(0, 8),
+                            textcoords='offset points', ha='center', fontsize=7,
+                            color='blue', fontweight='bold')
+            for tt, tv in zip(p2_tr_t, p2_tr_v):
+                ax.annotate(f'{tv:.1f}', xy=(tt, tv), xytext=(0, -12),
+                            textcoords='offset points', ha='center', fontsize=7,
+                            color='blue', fontweight='bold')
+
+        ax._pressure_stats = {
+            'p1': _channel_stats(p1_pk_v, p1_tr_v),
+            'p2': _channel_stats(p2_pk_v, p2_tr_v),
+        }
+
     ax.set_ylabel('Pressure (mmHg)')
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -186,34 +285,13 @@ def plot_flow(ax: plt.Axes, t: pd.Series) -> None:
                             textcoords='offset points', ha='center', fontsize=7,
                             color='blue', fontweight='bold')
 
-        # Compute statistics
-        peak_cv = compute_cv(peak_v)
-        trough_cv = compute_cv(trough_v)
-        if len(peak_t) >= 2:
-            inter_peak = np.diff(peak_t)
-            mean_period = np.mean(inter_peak)
-            cv_period = compute_cv(inter_peak)
-        else:
-            mean_period = 0.0
-            cv_period = 0.0
-
-        # Peak-to-nearby-peak time: for each peak, time to the next peak
-        if len(peak_t) >= 3:
-            peak_to_peak_times = np.diff(peak_t)
-            cv_p2p_time = compute_cv(peak_to_peak_times)
-            mean_p2p_time = np.mean(peak_to_peak_times)
-        else:
-            cv_p2p_time = 0.0
-            mean_p2p_time = mean_period
-
         # Store stats for display below the figure
         ax._flow_stats = {
-            'peak_cv': peak_cv, 'trough_cv': trough_cv,
-            'mean_period': mean_period, 'cv_period': cv_period,
-            'mean_p2p_time': mean_p2p_time, 'cv_p2p_time': cv_p2p_time,
             'n_peaks': len(peak_v), 'n_troughs': len(trough_v),
             'peak_mean': np.mean(peak_v) if len(peak_v) else 0,
+            'peak_cv': compute_cv(peak_v),
             'trough_mean': np.mean(trough_v) if len(trough_v) else 0,
+            'trough_cv': compute_cv(trough_v),
         }
 
     ax.set_ylabel('Flow Rate (mL/s)')
@@ -291,24 +369,42 @@ if 'Lap' in df.columns and df['Lap'].nunique() > 1:
 axes[-1].set_xlabel('Time (s)')
 plt.suptitle(custom_title if custom_title else filepath.split('/')[-1])
 
-# Add flow stats as text below the figure if flow was plotted
+# Collect any analysis stats stashed on axes by the panel functions.
 flow_stats = None
+pressure_stats = None
 for ax in axes:
     if hasattr(ax, '_flow_stats'):
         flow_stats = ax._flow_stats
-        break
+    if hasattr(ax, '_pressure_stats'):
+        pressure_stats = ax._pressure_stats
+
+stats_lines: list[str] = []
 
 if flow_stats:
     s = flow_stats
-    stats_text = (
-        f"Peaks (n={s['n_peaks']}): mean={s['peak_mean']:.2f} mL/s, CV={s['peak_cv']:.1f}%    "
-        f"Troughs (n={s['n_troughs']}): mean={s['trough_mean']:.2f} mL/s, CV={s['trough_cv']:.1f}%    "
-        f"Peak-to-peak time: mean={s['mean_p2p_time']:.3f}s ({60/s['mean_p2p_time']:.0f} BPM), CV={s['cv_p2p_time']:.1f}%"
+    stats_lines.append(
+        f"Flow   Peaks (n={s['n_peaks']:>2}): mean={s['peak_mean']:6.2f} mL/s, CV={s['peak_cv']:5.1f}%   "
+        f"Troughs (n={s['n_troughs']:>2}): mean={s['trough_mean']:6.2f} mL/s, CV={s['trough_cv']:5.1f}%"
     )
-    fig.subplots_adjust(bottom=0.12)
+
+if pressure_stats:
+    for label, key in (("P1", 'p1'), ("P2", 'p2')):
+        s = pressure_stats[key]
+        if s['n_peaks'] == 0:
+            continue
+        stats_lines.append(
+            f"{label}     Peaks (n={s['n_peaks']:>2}): mean={s['peak_mean']:6.2f} mmHg, CV={s['peak_cv']:5.1f}%   "
+            f"Troughs (n={s['n_troughs']:>2}): mean={s['trough_mean']:6.2f} mmHg, CV={s['trough_cv']:5.1f}%"
+        )
+
+if stats_lines:
+    stats_text = "\n".join(stats_lines)
+    # Reserve more bottom margin when there are multiple lines so they all fit.
+    bottom_margin = 0.06 + 0.03 * len(stats_lines)
+    fig.subplots_adjust(bottom=bottom_margin)
     fig.text(0.5, 0.01, stats_text, ha='center', va='bottom',
              fontsize=9, fontfamily='monospace',
              bbox=dict(boxstyle='round,pad=0.4', facecolor='wheat', alpha=0.8))
 
-plt.tight_layout(rect=[0, 0.05 if flow_stats else 0, 1, 0.96])
+plt.tight_layout(rect=[0, 0.05 if stats_lines else 0, 1, 0.96])
 plt.show()
