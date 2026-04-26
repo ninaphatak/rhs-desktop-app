@@ -6,7 +6,7 @@
 // ============================================================
 // PIN ASSIGNMENTS
 // ============================================================
-const int PT1Pin  = A0;       // Pressure sensor 1
+const int PT1Pin  = A3;       // Pressure sensor 1
 const int PT2Pin  = A1;       // Pressure sensor 2
 const int Tin     = 2;        // OneWire temperature bus
 const int FlowPin = 3;        // Turbine flow sensor (interrupt 1)
@@ -16,18 +16,20 @@ const int SPin    = 13;       // Solenoid
 // ============================================================
 // PRESSURE SENSOR CONSTANTS
 // ============================================================
-const float SRMax = 921.6;
-const float SRMin = 102.4;
-const int   PTMax = 10;
-const float mmHg  = 51.715;
+const float SRMax          = 1024.0;
+const float PT1_zero       = 197.0;   // Measured open-air ADC for PT1
+const float PT2_zero       = 186.0;   // Measured open-air ADC for PT2
+const float PT1_correction = -1.0;    
+const float PT2_correction = -1.0;    
+const int   PTMax          = 5;
+const float mmHg           = 51.715;
 
 // ============================================================
 // FLOW SENSOR CONSTANTS — Gems FT-110 173940-C
 // ============================================================
-const float K_FACTOR        = 1000.0;  // pulses per litre
-const float FLOW_MAX_ML_S   = 416.7;   // 25 LPM = 416.7 mL/s (sensor max)
-const float FLOW_ZERO_THRESHOLD = 5.0; // anything below this treated as zero
-                                        // eliminates turbine spin-down residual
+const float K_FACTOR            = 1000.0;  // pulses per litre
+const float FLOW_MAX_ML_S       = 416.7;   // 25 LPM = 416.7 mL/s (sensor max)
+const float FLOW_ZERO_THRESHOLD = 5.0;     // anything below this treated as zero
 
 // ============================================================
 // FLOW STATE
@@ -66,16 +68,7 @@ void flowPulseISR() {
 }
 
 // ============================================================
-// FLOW RATE CALCULATION — BPM-synced rolling window
-//
-// Derivation:
-//   Flow (mL/s) = (counts / K_FACTOR) / (interval / 1000)
-//               = (counts * 1,000,000) / (K_FACTOR * interval_ms)
-//
-//   1,000,000 = ms->s (x1000) combined with L->mL (x1000)
-//
-// Zero threshold eliminates turbine spin-down residual pulses
-// that cause false low readings during the closed phase.
+// FLOW RATE CALCULATION
 // ============================================================
 float calculateFlowRate(unsigned long windowMs) {
     static unsigned long lastCalcTime = 0;
@@ -84,12 +77,10 @@ float calculateFlowRate(unsigned long windowMs) {
     unsigned long now = millis();
     unsigned long interval = now - lastCalcTime;
 
-    // Not enough time elapsed — return last stable value
     if (interval < windowMs) {
         return lastFR;
     }
 
-    // Atomically read and reset pulse count
     noInterrupts();
     unsigned long counts = pulseCount;
     pulseCount = 0;
@@ -97,7 +88,6 @@ float calculateFlowRate(unsigned long windowMs) {
 
     lastCalcTime = now;
 
-    // No pulses — flow is zero
     if (counts == 0) {
         lastFR = 0.0;
         return 0.0;
@@ -105,13 +95,11 @@ float calculateFlowRate(unsigned long windowMs) {
 
     float newFR = (counts * 1000000.0) / (K_FACTOR * (float)interval);
 
-    // Above sensor max — likely noise, discard
     if (newFR > FLOW_MAX_ML_S) {
         lastFR = 0.0;
         return 0.0;
     }
 
-    // Below zero threshold — turbine spin-down, treat as zero
     if (newFR < FLOW_ZERO_THRESHOLD) {
         lastFR = 0.0;
         return 0.0;
@@ -123,12 +111,24 @@ float calculateFlowRate(unsigned long windowMs) {
 
 // ============================================================
 // PRESSURE READ HELPER
+// 8-sample average per channel, hardcoded per-channel zero,
+// per-channel correction, clamp negatives to zero
 // ============================================================
 void readPressure() {
-    PT1 = analogRead(PT1Pin);
-    PT2 = analogRead(PT2Pin);
-    PT1 = abs(((PT1 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
-    PT2 = abs(((PT2 - SRMin) * PTMax) / (SRMax - SRMin)) * mmHg;
+    float raw1 = 0, raw2 = 0;
+    for (int i = 0; i < 8; i++) {
+        raw1 += analogRead(PT1Pin);
+        raw2 += analogRead(PT2Pin);
+        delay(1);
+    }
+    raw1 /= 8.0;
+    raw2 /= 8.0;
+
+    PT1 = ((raw1 - PT1_zero) * PTMax) / (SRMax - PT1_zero) * mmHg + PT1_correction;
+    PT2 = ((raw2 - PT2_zero) * PTMax) / (SRMax - PT2_zero) * mmHg + PT2_correction;
+
+    if (PT1 < 0) PT1 = 0;
+    if (PT2 < 0) PT2 = 0;
 }
 
 // ============================================================
@@ -158,18 +158,15 @@ void setup() {
     pinMode(SPin, OUTPUT);
     pinMode(FPin, OUTPUT);
 
-    // Flow sensor — external 10kΩ pull-up to +5V required on D3
     pinMode(FlowPin, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(FlowPin), flowPulseISR, FALLING);
 
-    // Temperature sensors
     sensors.begin();
     sensors.setWaitForConversion(false);
     if (!sensors.getAddress(sensor1, 0)) { Serial.println("Sensor 1 not found!"); }
     if (!sensors.getAddress(sensor2, 1)) { Serial.println("Sensor 2 not found!"); }
     if (!sensors.getAddress(sensor3, 2)) { Serial.println("Sensor 3 not found!"); }
 
-    // Initial temperature read so values aren't zero at startup
     sensors.requestTemperatures();
     delay(100);
     VT1 = sensors.getTempC(sensor3);
@@ -191,8 +188,6 @@ void loop() {
         lastTempRead = millis();
     }
 
-    // Calculate phase duration and read delay from BPM
-    // At BPM=80: phaseDuration = 375ms, readDelay = 37ms
     unsigned long phaseDuration = (unsigned long)(abs(30000.0 / BPM));
     readDelay = (int)(phaseDuration * 0.1);
 
