@@ -402,10 +402,12 @@ stats_lines: list[str] = []
 
 if flow_stats:
     s = flow_stats
+    p2p = s['mean_p2p_time']
+    bpm_part = f" ({60/p2p:.0f} BPM)" if p2p > 0 else ""
     stats_lines.append(
         f"Flow   Peaks (n={s['n_peaks']:>2}): mean={s['peak_mean']:6.2f} mL/s, CV={s['peak_cv']:5.1f}%   "
         f"Troughs (n={s['n_troughs']:>2}): mean={s['trough_mean']:6.2f} mL/s, CV={s['trough_cv']:5.1f}%   "
-        f"P2P: mean={s['mean_p2p_time']:.3f}s, CV={s['cv_p2p_time']:5.1f}%"
+        f"P2P: mean={p2p:.3f}s{bpm_part}, CV={s['cv_p2p_time']:5.1f}%"
     )
 
 if pressure_stats:
@@ -413,10 +415,12 @@ if pressure_stats:
         s = pressure_stats[key]
         if s['n_peaks'] == 0:
             continue
+        p2p = s['mean_p2p']
+        bpm_part = f" ({60/p2p:.0f} BPM)" if p2p > 0 else ""
         stats_lines.append(
             f"{label}     Peaks (n={s['n_peaks']:>2}): mean={s['peak_mean']:6.2f} mmHg, CV={s['peak_cv']:5.1f}%   "
             f"Troughs (n={s['n_troughs']:>2}): mean={s['trough_mean']:6.2f} mmHg, CV={s['trough_cv']:5.1f}%   "
-            f"P2P: mean={s['mean_p2p']:.3f}s, CV={s['cv_p2p']:5.1f}%"
+            f"P2P: mean={p2p:.3f}s{bpm_part}, CV={s['cv_p2p']:5.1f}%"
         )
 
 if stats_lines:
@@ -427,7 +431,7 @@ if stats_lines:
     bottom_margin = 0.09 + 0.03 * len(stats_lines)
     fig.subplots_adjust(bottom=bottom_margin)
     fig.text(0.5, box_y, stats_text, ha='center', va='bottom',
-             fontsize=9, fontfamily='monospace',
+             fontsize=9, fontfamily='monospace', fontweight='bold',
              bbox=dict(boxstyle='round,pad=0.4', facecolor='#B5EAD7', alpha=0.85))
 
 plt.tight_layout(rect=[0, 0.08 if stats_lines else 0, 1, 0.96])
