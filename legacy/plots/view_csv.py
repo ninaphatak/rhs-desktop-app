@@ -421,12 +421,14 @@ if pressure_stats:
 
 if stats_lines:
     stats_text = "\n".join(stats_lines)
-    # Reserve more bottom margin when there are multiple lines so they all fit.
-    bottom_margin = 0.06 + 0.03 * len(stats_lines)
+    # Reserve more bottom margin when there are multiple lines so they all fit;
+    # the box itself sits at y=0.04 so it floats off the figure's bottom edge.
+    box_y = 0.04
+    bottom_margin = 0.09 + 0.03 * len(stats_lines)
     fig.subplots_adjust(bottom=bottom_margin)
-    fig.text(0.5, 0.01, stats_text, ha='center', va='bottom',
+    fig.text(0.5, box_y, stats_text, ha='center', va='bottom',
              fontsize=9, fontfamily='monospace',
              bbox=dict(boxstyle='round,pad=0.4', facecolor='#B5EAD7', alpha=0.85))
 
-plt.tight_layout(rect=[0, 0.05 if stats_lines else 0, 1, 0.96])
+plt.tight_layout(rect=[0, 0.08 if stats_lines else 0, 1, 0.96])
 plt.show()
