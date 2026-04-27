@@ -128,8 +128,15 @@ def find_pressure_peaks_and_troughs(t: pd.Series, signal: pd.Series):
     return peak_t, peak_v, np.array(trough_t), np.array(trough_v)
 
 
-def _channel_stats(peak_v: np.ndarray, trough_v: np.ndarray) -> dict:
+def _channel_stats(peak_v: np.ndarray, trough_v: np.ndarray, peak_t: np.ndarray) -> dict:
     """Bundle the per-channel peak/trough stats used in the figure caption."""
+    if len(peak_t) >= 2:
+        p2p = np.diff(peak_t)
+        mean_p2p = float(np.mean(p2p))
+        cv_p2p = compute_cv(p2p)
+    else:
+        mean_p2p = 0.0
+        cv_p2p = 0.0
     return {
         'n_peaks': len(peak_v),
         'n_troughs': len(trough_v),
@@ -137,6 +144,8 @@ def _channel_stats(peak_v: np.ndarray, trough_v: np.ndarray) -> dict:
         'peak_cv': compute_cv(peak_v),
         'trough_mean': float(np.mean(trough_v)) if len(trough_v) else 0.0,
         'trough_cv': compute_cv(trough_v),
+        'mean_p2p': mean_p2p,
+        'cv_p2p': cv_p2p,
     }
 
 
@@ -180,8 +189,8 @@ def plot_pressure(ax: plt.Axes, t: pd.Series) -> None:
                             color='blue', fontweight='bold')
 
         ax._pressure_stats = {
-            'p1': _channel_stats(p1_pk_v, p1_tr_v),
-            'p2': _channel_stats(p2_pk_v, p2_tr_v),
+            'p1': _channel_stats(p1_pk_v, p1_tr_v, p1_pk_t),
+            'p2': _channel_stats(p2_pk_v, p2_tr_v, p2_pk_t),
         }
 
     ax.set_ylabel('Pressure (mmHg)')
@@ -285,6 +294,15 @@ def plot_flow(ax: plt.Axes, t: pd.Series) -> None:
                             textcoords='offset points', ha='center', fontsize=7,
                             color='blue', fontweight='bold')
 
+        # Peak-to-peak time (and its CV) -- used by the stats box below figure
+        if len(peak_t) >= 2:
+            p2p = np.diff(peak_t)
+            mean_p2p_time = float(np.mean(p2p))
+            cv_p2p_time = compute_cv(p2p)
+        else:
+            mean_p2p_time = 0.0
+            cv_p2p_time = 0.0
+
         # Store stats for display below the figure
         ax._flow_stats = {
             'n_peaks': len(peak_v), 'n_troughs': len(trough_v),
@@ -292,6 +310,8 @@ def plot_flow(ax: plt.Axes, t: pd.Series) -> None:
             'peak_cv': compute_cv(peak_v),
             'trough_mean': np.mean(trough_v) if len(trough_v) else 0,
             'trough_cv': compute_cv(trough_v),
+            'mean_p2p_time': mean_p2p_time,
+            'cv_p2p_time': cv_p2p_time,
         }
 
     ax.set_ylabel('Flow Rate (mL/s)')
@@ -382,9 +402,12 @@ stats_lines: list[str] = []
 
 if flow_stats:
     s = flow_stats
+    p2p = s['mean_p2p_time']
+    bpm_part = f" ({60/p2p:.0f} BPM)" if p2p > 0 else ""
     stats_lines.append(
         f"Flow   Peaks (n={s['n_peaks']:>2}): mean={s['peak_mean']:6.2f} mL/s, CV={s['peak_cv']:5.1f}%   "
-        f"Troughs (n={s['n_troughs']:>2}): mean={s['trough_mean']:6.2f} mL/s, CV={s['trough_cv']:5.1f}%"
+        f"Troughs (n={s['n_troughs']:>2}): mean={s['trough_mean']:6.2f} mL/s, CV={s['trough_cv']:5.1f}%   "
+        f"P2P: mean={p2p:.3f}s{bpm_part}, CV={s['cv_p2p_time']:5.1f}%"
     )
 
 if pressure_stats:
@@ -392,19 +415,24 @@ if pressure_stats:
         s = pressure_stats[key]
         if s['n_peaks'] == 0:
             continue
+        p2p = s['mean_p2p']
+        bpm_part = f" ({60/p2p:.0f} BPM)" if p2p > 0 else ""
         stats_lines.append(
             f"{label}     Peaks (n={s['n_peaks']:>2}): mean={s['peak_mean']:6.2f} mmHg, CV={s['peak_cv']:5.1f}%   "
-            f"Troughs (n={s['n_troughs']:>2}): mean={s['trough_mean']:6.2f} mmHg, CV={s['trough_cv']:5.1f}%"
+            f"Troughs (n={s['n_troughs']:>2}): mean={s['trough_mean']:6.2f} mmHg, CV={s['trough_cv']:5.1f}%   "
+            f"P2P: mean={p2p:.3f}s{bpm_part}, CV={s['cv_p2p']:5.1f}%"
         )
 
 if stats_lines:
     stats_text = "\n".join(stats_lines)
-    # Reserve more bottom margin when there are multiple lines so they all fit.
-    bottom_margin = 0.06 + 0.03 * len(stats_lines)
+    # Reserve more bottom margin when there are multiple lines so they all fit;
+    # the box itself sits at y=0.04 so it floats off the figure's bottom edge.
+    box_y = 0.04
+    bottom_margin = 0.09 + 0.03 * len(stats_lines)
     fig.subplots_adjust(bottom=bottom_margin)
-    fig.text(0.5, 0.01, stats_text, ha='center', va='bottom',
-             fontsize=9, fontfamily='monospace',
-             bbox=dict(boxstyle='round,pad=0.4', facecolor='wheat', alpha=0.8))
+    fig.text(0.5, box_y, stats_text, ha='center', va='bottom',
+             fontsize=9, fontfamily='monospace', fontweight='bold',
+             bbox=dict(boxstyle='round,pad=0.4', facecolor='#B5EAD7', alpha=0.85))
 
-plt.tight_layout(rect=[0, 0.05 if stats_lines else 0, 1, 0.96])
+plt.tight_layout(rect=[0, 0.08 if stats_lines else 0, 1, 0.96])
 plt.show()
