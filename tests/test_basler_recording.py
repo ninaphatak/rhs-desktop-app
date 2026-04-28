@@ -48,21 +48,22 @@ class TestBaslerCameraRecording:
         assert cam._record_path == first_path
         cam.stop_recording()
 
-    def test_write_frame_when_not_recording_is_noop(self) -> None:
-        """_write_frame without an active recording should not crash."""
+    def test_enqueue_frame_when_not_recording_is_noop(self) -> None:
+        """_enqueue_frame without an active recording should not crash."""
         cam = BaslerCamera()
         frame = np.zeros((480, 640), dtype=np.uint8)
-        cam._write_frame(frame)  # should not raise
+        cam._enqueue_frame(frame)  # should not raise
         assert cam._ffmpeg_proc is None
 
-    def test_write_frame_produces_mp4(self, tmp_path: Path) -> None:
-        """_write_frame after start_recording lazy-spawns ffmpeg and writes a real .mp4."""
+    def test_enqueue_frame_produces_mp4(self, tmp_path: Path) -> None:
+        """_enqueue_frame after start_recording produces a real .mp4 via the writer thread."""
         cam = BaslerCamera()
         output_path = tmp_path / "test.mp4"
         cam.start_recording(str(output_path))
         frame = np.zeros((120, 160), dtype=np.uint8)
         for _ in range(5):
-            cam._write_frame(frame)
+            cam._enqueue_frame(frame)
         cam.stop_recording()
         assert output_path.exists()
         assert output_path.stat().st_size > 0
+        assert cam._record_frame_count == 5

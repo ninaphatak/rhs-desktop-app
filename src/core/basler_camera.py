@@ -1,10 +1,13 @@
 """QThread-based Basler camera interface using pypylon (PySide6).
 
 Recording writes H.264/MP4 via a piped ffmpeg subprocess (bundled by
-imageio-ffmpeg for cross-OS support). The grab loop writes raw frames
-into ffmpeg's stdin; ffmpeg encodes and finalizes the .mp4 container.
+imageio-ffmpeg for cross-OS support). Each camera owns a dedicated
+writer thread that consumes a bounded frame queue and pipes raw bytes
+into ffmpeg's stdin — this decouples the encode rate from the grab
+rate so transient encoder lag does not cause pylon to drop frames.
 """
 
+import queue
 import subprocess
 import threading
 import time
@@ -29,8 +32,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-H264_PRESET = "fast"
-H264_CRF = 18
+H264_PRESET = "ultrafast"
+H264_CRF = 23
+# Bounded queue absorbs transient encoder lag without blocking the
+# grab thread. ~5 seconds at 30 fps. Full → drop frame, log warning.
+FRAME_QUEUE_MAX = 150
 
 
 def _spawn_ffmpeg(output_path: Path, width: int, height: int, is_mono: bool,
@@ -54,8 +60,11 @@ def _spawn_ffmpeg(output_path: Path, width: int, height: int, is_mono: bool,
         str(output_path),
     ]
     try:
+        # stderr=DEVNULL so a slow consumer can't fill the pipe and
+        # block ffmpeg's logging path. -loglevel error already silences
+        # routine output; on actual failure the nonzero exit code surfaces.
         return subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+                                stderr=subprocess.DEVNULL)
     except OSError as e:
         logger.error(f"Failed to spawn ffmpeg: {e}")
         return None
@@ -79,12 +88,17 @@ class BaslerCamera(QThread):
         self.target_fps = 30
         self.exposure_us = 25000
         self._frame_count = 0
-        # Recording state. Accessed from both the grab thread (_write_frame)
-        # and whatever thread calls stop_recording — serialize via lock.
-        self._writer_lock = threading.Lock()
-        self._ffmpeg_proc: Optional[subprocess.Popen] = None
+        # Recording state. The grab thread enqueues; the writer thread
+        # consumes the queue and pipes to ffmpeg. State transitions
+        # (start/stop) flip _record_path under _state_lock.
+        self._state_lock = threading.Lock()
         self._record_path: Optional[Path] = None
         self._record_frame_count: int = 0
+        self._record_dropped: int = 0
+        self._frame_queue: Optional[queue.Queue] = None
+        self._writer_thread: Optional[threading.Thread] = None
+        self._writer_stop_event = threading.Event()
+        self._ffmpeg_proc: Optional[subprocess.Popen] = None
 
     @staticmethod
     def list_cameras() -> list[str]:
@@ -177,7 +191,7 @@ class BaslerCamera(QThread):
                         frame = grab.Array.copy()
                         grab.Release()
                         self._frame_count += 1
-                        self._write_frame(frame)
+                        self._enqueue_frame(frame)
                         self.frame_ready.emit({
                             "timestamp": ts,
                             "frame": frame,
@@ -216,9 +230,9 @@ class BaslerCamera(QThread):
     def start_recording(self, output_path: str) -> None:
         """Start recording frames to an H.264/MP4 file.
 
-        Lazy-spawns ffmpeg on the first frame so image dimensions are
-        known. Container fps = self.target_fps so playback speed matches
-        the camera's actual grab rate.
+        Spawns a dedicated writer thread that pipes queued frames into
+        ffmpeg. Container fps = self.target_fps so playback speed
+        matches the camera's actual grab rate.
 
         Args:
             output_path: Full path for the output .mp4 file.
@@ -227,73 +241,124 @@ class BaslerCamera(QThread):
         if path.suffix.lower() != ".mp4":
             path = path.with_suffix(".mp4")
 
-        with self._writer_lock:
-            if self._ffmpeg_proc is not None or self._record_path is not None:
+        with self._state_lock:
+            if self._record_path is not None:
                 logger.warning("Already recording — stop first")
                 return
             path.parent.mkdir(parents=True, exist_ok=True)
             self._record_path = path
             self._record_frame_count = 0
+            self._record_dropped = 0
+            self._frame_queue = queue.Queue(maxsize=FRAME_QUEUE_MAX)
+            self._writer_stop_event.clear()
+            self._writer_thread = threading.Thread(
+                target=self._writer_loop, daemon=True,
+                name=f"BaslerCamera-writer-{path.stem}",
+            )
+            self._writer_thread.start()
         logger.info(f"Recording armed: {path} "
-                    f"(@ {self.target_fps}fps, H.264 CRF {H264_CRF})")
+                    f"(@ {self.target_fps}fps, H.264 {H264_PRESET} CRF {H264_CRF})")
 
     def stop_recording(self) -> None:
         """Stop an in-progress recording. Safe to call from any thread.
 
-        Swaps the ffmpeg process out under the lock so no further writes
-        land on it, then does the slow finalize (stdin.close + wait)
-        outside the lock to avoid blocking the grab thread.
+        Signals the writer thread to drain the queue and exit, then
+        joins it. The writer thread closes ffmpeg's stdin and waits
+        for it to finalize the file.
         """
-        with self._writer_lock:
-            proc = self._ffmpeg_proc
+        with self._state_lock:
             path = self._record_path
-            count = self._record_frame_count
-            self._ffmpeg_proc = None
             self._record_path = None
-            self._record_frame_count = 0
+            writer = self._writer_thread
+            self._writer_thread = None
+        if path is None:
+            return
 
-        if proc is None:
+        self._writer_stop_event.set()
+        if writer is not None:
+            writer.join(timeout=15)
+            if writer.is_alive():
+                logger.warning(
+                    f"Writer thread for {path} did not exit in 15s")
+
+    def _enqueue_frame(self, frame) -> None:
+        """Hand a freshly-grabbed frame to the writer thread.
+
+        Non-blocking. If the queue is full (encoder is too slow), the
+        frame is dropped and a warning is logged at most every 30
+        drops to avoid log spam.
+        """
+        q = self._frame_queue
+        if q is None or self._record_path is None:
             return
         try:
-            proc.stdin.close()
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            logger.warning("ffmpeg wouldn't finalize in 30s — killed")
-        if proc.returncode not in (0, None):
-            err = (proc.stderr.read().decode(errors="replace")
-                   if proc.stderr else "")
-            logger.warning(f"ffmpeg exit {proc.returncode}. stderr:\n"
-                           f"{err[-600:]}")
-        if path:
-            logger.info(f"Recording saved: {path} ({count} frames)")
+            q.put_nowait(frame)
+        except queue.Full:
+            self._record_dropped += 1
+            if self._record_dropped % 30 == 1:
+                logger.warning(
+                    f"Recording queue full — dropped "
+                    f"{self._record_dropped} frame(s) so far")
 
-    def _write_frame(self, frame) -> None:
-        """Write a single frame if recording is active. Runs on grab thread."""
-        with self._writer_lock:
-            if self._record_path is None:
-                return
-            # Lazy-spawn ffmpeg on first frame so dimensions are known
-            if self._ffmpeg_proc is None:
+    def _writer_loop(self) -> None:
+        """Consume frames from the queue and write them to ffmpeg.
+
+        Runs in its own thread. Lazy-spawns ffmpeg on the first frame
+        so dimensions are known. Drains remaining frames after
+        stop_recording is called.
+        """
+        proc: Optional[subprocess.Popen] = None
+        path = self._record_path  # captured at start; for logging only
+        q = self._frame_queue
+        if q is None or path is None:
+            return
+
+        while True:
+            stop_requested = self._writer_stop_event.is_set()
+            try:
+                frame = q.get(timeout=0.1)
+            except queue.Empty:
+                if stop_requested:
+                    break
+                continue
+
+            if proc is None:
                 h, w = frame.shape[:2]
                 is_mono = frame.ndim == 2
-                proc = _spawn_ffmpeg(self._record_path, w, h, is_mono,
+                proc = _spawn_ffmpeg(path, w, h, is_mono,
                                      float(self.target_fps))
                 if proc is None:
-                    logger.error(f"Cannot spawn ffmpeg for {self._record_path}")
-                    self._record_path = None
+                    logger.error(f"Cannot spawn ffmpeg for {path}")
                     return
                 self._ffmpeg_proc = proc
-                logger.info(f"Recording started: {w}x{h} → {self._record_path}")
+                logger.info(f"Recording started: {w}x{h} → {path}")
 
             try:
-                self._ffmpeg_proc.stdin.write(frame.tobytes())
+                proc.stdin.write(frame.tobytes())
             except (BrokenPipeError, OSError) as e:
                 logger.error(f"ffmpeg stdin write failed: {e}")
-                return
+                break
             self._record_frame_count += 1
             if self._record_frame_count % 60 == 0:
-                logger.info(f"  Recorded {self._record_frame_count} frames")
+                logger.info(
+                    f"  Recorded {self._record_frame_count} frames "
+                    f"({self._record_dropped} dropped)")
+
+        # Finalize ffmpeg
+        if proc is not None:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                logger.warning("ffmpeg wouldn't finalize in 30s — killed")
+            if proc.returncode not in (0, None):
+                logger.warning(f"ffmpeg exit {proc.returncode} for {path}")
+            self._ffmpeg_proc = None
+            logger.info(
+                f"Recording saved: {path} "
+                f"({self._record_frame_count} frames, "
+                f"{self._record_dropped} dropped)")
