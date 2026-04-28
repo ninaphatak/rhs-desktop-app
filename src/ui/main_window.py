@@ -79,8 +79,8 @@ class MainWindow(QMainWindow):
                 VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
                 # Extract timestamp from CSV filename: rhs_YYYY-MM-DD_HH-MM-SS.csv
                 timestamp = filename.replace("rhs_", "").replace(".csv", "")
-                cam1_path = str(VIDEOS_DIR / f"camera1_{timestamp}.avi")
-                cam2_path = str(VIDEOS_DIR / f"camera2_{timestamp}.avi")
+                cam1_path = str(VIDEOS_DIR / f"camera1_{timestamp}.mp4")
+                cam2_path = str(VIDEOS_DIR / f"camera2_{timestamp}.mp4")
                 self._camera_panel.start_recording(cam1_path, cam2_path)
                 self._control_bar.set_camera_recording(True)
 

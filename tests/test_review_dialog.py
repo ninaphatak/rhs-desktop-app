@@ -14,8 +14,8 @@ class TestSessionDiscovery:
         videos_dir = tmp_path / "videos"
         videos_dir.mkdir()
         (tmp_path / "rhs_2026-04-08_14-30-00.csv").touch()
-        (videos_dir / "camera1_2026-04-08_14-30-00.avi").touch()
-        (videos_dir / "camera2_2026-04-08_14-30-00.avi").touch()
+        (videos_dir / "camera1_2026-04-08_14-30-00.mp4").touch()
+        (videos_dir / "camera2_2026-04-08_14-30-00.mp4").touch()
 
         sessions = discover_sessions(tmp_path)
         assert len(sessions) == 1
@@ -35,7 +35,7 @@ class TestSessionDiscovery:
         videos_dir = tmp_path / "videos"
         videos_dir.mkdir()
         (tmp_path / "rhs_2026-04-08_14-30-00.csv").touch()
-        (videos_dir / "camera1_2026-04-08_14-30-00.avi").touch()
+        (videos_dir / "camera1_2026-04-08_14-30-00.mp4").touch()
 
         sessions = discover_sessions(tmp_path)
         assert len(sessions) == 0
@@ -46,8 +46,8 @@ class TestSessionDiscovery:
         videos_dir.mkdir()
         for ts in ["2026-04-08_14-30-00", "2026-04-08_15-00-00"]:
             (tmp_path / f"rhs_{ts}.csv").touch()
-            (videos_dir / f"camera1_{ts}.avi").touch()
-            (videos_dir / f"camera2_{ts}.avi").touch()
+            (videos_dir / f"camera1_{ts}.mp4").touch()
+            (videos_dir / f"camera2_{ts}.mp4").touch()
 
         sessions = discover_sessions(tmp_path)
         assert len(sessions) == 2
@@ -59,10 +59,10 @@ class TestSessionDiscovery:
         videos_dir.mkdir()
         ts = "2026-04-08_14-30-00"
         (tmp_path / f"rhs_{ts}.csv").touch()
-        (videos_dir / f"camera1_{ts}.avi").touch()
-        (videos_dir / f"camera2_{ts}.avi").touch()
+        (videos_dir / f"camera1_{ts}.mp4").touch()
+        (videos_dir / f"camera2_{ts}.mp4").touch()
 
         session = discover_sessions(tmp_path)[0]
         assert session["csv"] == tmp_path / f"rhs_{ts}.csv"
-        assert session["cam1"] == videos_dir / f"camera1_{ts}.avi"
-        assert session["cam2"] == videos_dir / f"camera2_{ts}.avi"
+        assert session["cam1"] == videos_dir / f"camera1_{ts}.mp4"
+        assert session["cam2"] == videos_dir / f"camera2_{ts}.mp4"

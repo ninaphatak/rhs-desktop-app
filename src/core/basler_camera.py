@@ -1,11 +1,16 @@
-"""QThread-based Basler camera interface using pypylon (PySide6)."""
+"""QThread-based Basler camera interface using pypylon (PySide6).
 
+Recording writes H.264/MP4 via a piped ffmpeg subprocess (bundled by
+imageio-ffmpeg for cross-OS support). The grab loop writes raw frames
+into ffmpeg's stdin; ffmpeg encodes and finalizes the .mp4 container.
+"""
+
+import subprocess
+import threading
 import time
 import logging
+from pathlib import Path
 from typing import Optional
-
-import cv2
-import numpy as np
 
 from PySide6.QtCore import QThread, Signal
 
@@ -16,7 +21,44 @@ except ImportError:
     PYPYLON_AVAILABLE = False
     pylon = None
 
+try:
+    import imageio_ffmpeg
+    IMAGEIO_FFMPEG_AVAILABLE = True
+except ImportError:
+    IMAGEIO_FFMPEG_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
+
+H264_PRESET = "fast"
+H264_CRF = 18
+
+
+def _spawn_ffmpeg(output_path: Path, width: int, height: int, is_mono: bool,
+                  fps: float) -> Optional[subprocess.Popen]:
+    """Spawn ffmpeg reading raw frames from stdin, writing H.264/MP4."""
+    if not IMAGEIO_FFMPEG_AVAILABLE:
+        logger.error("imageio-ffmpeg not installed — cannot record")
+        return None
+    cmd = [
+        imageio_ffmpeg.get_ffmpeg_exe(),
+        "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "rawvideo",
+        "-pix_fmt", "gray" if is_mono else "bgr24",
+        "-s", f"{width}x{height}",
+        "-r", f"{fps:g}",
+        "-i", "-",
+        "-c:v", "libx264",
+        "-preset", H264_PRESET,
+        "-crf", str(H264_CRF),
+        "-pix_fmt", "yuv420p",
+        str(output_path),
+    ]
+    try:
+        return subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+    except OSError as e:
+        logger.error(f"Failed to spawn ffmpeg: {e}")
+        return None
 
 
 class BaslerCamera(QThread):
@@ -37,9 +79,12 @@ class BaslerCamera(QThread):
         self.target_fps = 30
         self.exposure_us = 25000
         self._frame_count = 0
-        self._video_writer: Optional[cv2.VideoWriter] = None
-        self._is_recording = False
-        self._last_frame_size: Optional[tuple[int, int]] = None
+        # Recording state. Accessed from both the grab thread (_write_frame)
+        # and whatever thread calls stop_recording — serialize via lock.
+        self._writer_lock = threading.Lock()
+        self._ffmpeg_proc: Optional[subprocess.Popen] = None
+        self._record_path: Optional[Path] = None
+        self._record_frame_count: int = 0
 
     @staticmethod
     def list_cameras() -> list[str]:
@@ -96,6 +141,7 @@ class BaslerCamera(QThread):
             logger.warning(f"Could not configure camera: {e}")
 
     def disconnect(self) -> None:
+        self.stop_recording()
         self.stop()
         if self._camera:
             try:
@@ -130,9 +176,8 @@ class BaslerCamera(QThread):
                         ts = time.time()
                         frame = grab.Array.copy()
                         grab.Release()
-                        self._last_frame_size = (frame.shape[1], frame.shape[0])
-                        self._write_frame(frame)
                         self._frame_count += 1
+                        self._write_frame(frame)
                         self.frame_ready.emit({
                             "timestamp": ts,
                             "frame": frame,
@@ -149,7 +194,6 @@ class BaslerCamera(QThread):
         except Exception as e:
             self.error_occurred.emit(f"Grab error: {e}")
         finally:
-            self._release_writer()
             if self._camera and self._camera.IsGrabbing():
                 self._camera.StopGrabbing()
 
@@ -159,8 +203,6 @@ class BaslerCamera(QThread):
         self._running = False
         if self.isRunning():
             self.wait(2000)
-        # If thread wasn't running (e.g. never started), release here
-        self._release_writer()
 
     @property
     def is_connected(self) -> bool:
@@ -169,54 +211,89 @@ class BaslerCamera(QThread):
     @property
     def is_recording(self) -> bool:
         """Return True if a video recording is currently active."""
-        return self._is_recording
+        return self._record_path is not None
 
     def start_recording(self, output_path: str) -> None:
-        """Start recording frames to an AVI file (MJPG codec).
+        """Start recording frames to an H.264/MP4 file.
+
+        Lazy-spawns ffmpeg on the first frame so image dimensions are
+        known. Container fps = self.target_fps so playback speed matches
+        the camera's actual grab rate.
 
         Args:
-            output_path: Full path for the output .avi file.
-
-        Raises:
-            ValueError: If no frame size is known yet (no frames grabbed).
+            output_path: Full path for the output .mp4 file.
         """
-        if self._is_recording:
-            self.stop_recording()
-        if self._last_frame_size is None:
-            raise ValueError("Cannot start recording: frame size unknown (no frames grabbed yet)")
-        w, h = self._last_frame_size
-        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        self._video_writer = cv2.VideoWriter(output_path, fourcc, self.target_fps, (w, h), isColor=True)
-        self._is_recording = True
-        logger.info(f"Camera recording started: {output_path}")
+        path = Path(output_path)
+        if path.suffix.lower() != ".mp4":
+            path = path.with_suffix(".mp4")
+
+        with self._writer_lock:
+            if self._ffmpeg_proc is not None or self._record_path is not None:
+                logger.warning("Already recording — stop first")
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._record_path = path
+            self._record_frame_count = 0
+        logger.info(f"Recording armed: {path} "
+                    f"(@ {self.target_fps}fps, H.264 CRF {H264_CRF})")
 
     def stop_recording(self) -> None:
-        """Stop recording. Safe to call from any thread.
+        """Stop an in-progress recording. Safe to call from any thread.
 
-        Sets the recording flag to False so the grab loop stops writing.
-        The VideoWriter is released in _release_writer(), which must be
-        called from the same thread that writes (the QThread's run loop).
+        Swaps the ffmpeg process out under the lock so no further writes
+        land on it, then does the slow finalize (stdin.close + wait)
+        outside the lock to avoid blocking the grab thread.
         """
-        if not self._is_recording:
+        with self._writer_lock:
+            proc = self._ffmpeg_proc
+            path = self._record_path
+            count = self._record_frame_count
+            self._ffmpeg_proc = None
+            self._record_path = None
+            self._record_frame_count = 0
+
+        if proc is None:
             return
-        self._is_recording = False
-        logger.info("Camera recording stopping")
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            logger.warning("ffmpeg wouldn't finalize in 30s — killed")
+        if proc.returncode not in (0, None):
+            err = (proc.stderr.read().decode(errors="replace")
+                   if proc.stderr else "")
+            logger.warning(f"ffmpeg exit {proc.returncode}. stderr:\n"
+                           f"{err[-600:]}")
+        if path:
+            logger.info(f"Recording saved: {path} ({count} frames)")
 
-    def _release_writer(self) -> None:
-        """Release the VideoWriter. Must be called from the grab thread."""
-        if self._video_writer:
-            self._video_writer.release()
-            self._video_writer = None
-            logger.info("Camera recording stopped")
+    def _write_frame(self, frame) -> None:
+        """Write a single frame if recording is active. Runs on grab thread."""
+        with self._writer_lock:
+            if self._record_path is None:
+                return
+            # Lazy-spawn ffmpeg on first frame so dimensions are known
+            if self._ffmpeg_proc is None:
+                h, w = frame.shape[:2]
+                is_mono = frame.ndim == 2
+                proc = _spawn_ffmpeg(self._record_path, w, h, is_mono,
+                                     float(self.target_fps))
+                if proc is None:
+                    logger.error(f"Cannot spawn ffmpeg for {self._record_path}")
+                    self._record_path = None
+                    return
+                self._ffmpeg_proc = proc
+                logger.info(f"Recording started: {w}x{h} → {self._record_path}")
 
-    def _write_frame(self, frame: "np.ndarray") -> None:
-        """Write a single frame to the video file if recording.
-
-        MJPG on macOS requires BGR input — grayscale frames cause corrupt
-        output ('overread', 'error count' warnings).  Convert before writing.
-        """
-        if not self._is_recording or self._video_writer is None:
-            return
-        if frame.ndim == 2:
-            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-        self._video_writer.write(frame)
+            try:
+                self._ffmpeg_proc.stdin.write(frame.tobytes())
+            except (BrokenPipeError, OSError) as e:
+                logger.error(f"ffmpeg stdin write failed: {e}")
+                return
+            self._record_frame_count += 1
+            if self._record_frame_count % 60 == 0:
+                logger.info(f"  Recorded {self._record_frame_count} frames")

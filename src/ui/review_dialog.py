@@ -60,8 +60,8 @@ def discover_sessions(outputs_dir: Path | None = None) -> list[dict]:
         if not match:
             continue
         ts = match.group(1)
-        cam1 = videos_dir / f"camera1_{ts}.avi"
-        cam2 = videos_dir / f"camera2_{ts}.avi"
+        cam1 = videos_dir / f"camera1_{ts}.mp4"
+        cam2 = videos_dir / f"camera2_{ts}.mp4"
         if cam1.exists() and cam2.exists():
             sessions.append({
                 "timestamp": ts,
