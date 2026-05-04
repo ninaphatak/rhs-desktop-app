@@ -29,6 +29,10 @@ sparse-but-honest ground truth we get:
 3. **CV of per-cycle landmark displacement** across cycles (kinematic
    regularity of one identifiable point on the valve).
 
+Plus a playback tool that animates the manual track on the source video
+— useful for sanity-checking annotations and for showing the deliverable
+to Dr. Lee.
+
 This is the deliverable now: a *validated point-tracker accuracy number*
 plus a *cardiac-cycle reproducibility characterization*. No orifice-area
 proxies, no flow-rate analogues — just leaflet kinematics.
@@ -126,7 +130,62 @@ per-cycle CV calculations.
   with frame pixels for the first version (skip the scaling code path).
 - Keep the file under ~250 lines.
 
-### 2. Analysis — `tools/analyze_annotations.py`
+### 2. Playback — `tools/playback_annotations.py`
+
+CLI:
+```
+python tools/playback_annotations.py path/to/recording.mp4 \
+    [--annotations path/to/recording.annotations.csv] \
+    [--speed 1.0]
+```
+
+Default annotations path: same naming convention as the annotator
+(`<video_basename>.annotations.csv` next to the video).
+
+**Purpose:** visualize the annotated trajectory as the source video plays
+back, with a displacement vector anchored at the very first annotated
+point and animating to the current frame's annotated point. Lets the
+user (and Dr. Lee) see the manual track in motion.
+
+**Per-frame overlay:**
+
+| Element | Detail |
+|---|---|
+| Origin marker | Small green crosshair at `P₀` = the first annotated frame's `(x, y)`. Drawn on every frame, persistent. |
+| Current marker | Red filled circle (radius 4 px) at the current frame's annotated `(x, y)`, if present. |
+| Displacement vector | Yellow `cv2.arrowedLine` from `P₀` to the current annotated point. |
+| Trail polyline | Faded gray polyline connecting every annotated `(x, y)` shown so far in playback order. Cumulative — grows as playback advances. |
+| Phase label | Current frame's phase in top-right corner. Carries forward the last known phase between annotated frames so the label doesn't flicker. |
+| Frame counter | `Frame f / F` in top-left, plus `n_labeled` so far. |
+
+**Sparse-annotation handling:** between annotated frames, keep showing
+the *last drawn* arrow and last phase label rather than blanking the
+overlay. Matches the user's "moving vector" intuition and avoids flicker.
+
+**Controls:**
+
+| Key | Action |
+|---|---|
+| `SPACE` | Play / pause |
+| `→` or `d` | Step forward one frame (paused) |
+| `←` or `a` | Step backward one frame (paused) |
+| `r` | Restart playback from frame 0 |
+| `q` | Quit |
+
+Playback rate = source FPS × `--speed`.
+
+**No file output in v1.** A future `--export` flag to write the overlaid
+MP4 (for slides / Dr. Lee handoff) is scope-deferred.
+
+**Implementation notes:**
+- Reuse the source video via `cv2.VideoCapture`. Step-backward is supported
+  by setting `CAP_PROP_POS_FRAMES`; expect a small seek cost.
+- Pre-load the annotations CSV into a `dict[int, dict]` keyed by
+  `frame_idx` so per-frame lookup is O(1).
+- Render arrow + crosshair via primitives — no extra deps.
+- Keep the file under ~250 lines.
+
+### 3. Analysis — `tools/analyze_annotations.py`
 
 CLI:
 ```
@@ -207,8 +266,9 @@ amendments when the implementation plan is written.
 | Task 11 (`_metrics.py`) | **Removed**; cycle-period FFT helpers no longer needed. Cycle metrics live in `tools/analyze_annotations.py` |
 | Task 12 (validation report) | **Deferred** until first annotated session yields data |
 | _new_ Task 9' | Build `tools/annotate_point.py` |
-| _new_ Task 10' | Build `tools/analyze_annotations.py` (Mode A) |
-| _new_ Task 11' | Extend `tools/analyze_annotations.py` with Mode B (Farneback comparison at annotated points) |
+| _new_ Task 10' | Build `tools/playback_annotations.py` |
+| _new_ Task 11' | Build `tools/analyze_annotations.py` (Mode A) |
+| _new_ Task 12' | Extend `tools/analyze_annotations.py` with Mode B (Farneback comparison at annotated points) |
 
 Detailed task breakdown deferred to the implementation plan.
 
@@ -219,6 +279,11 @@ Per the project rule (CLAUDE.md §Testing Requirements):
 - `tests/test_annotate_point.py` — synthetic annotation dict round-trips
   through CSV save/load. Verify header, sparse rows, sorted frame_idx,
   rejection of malformed phases on load. **No GUI test.**
+- `tests/test_playback_annotations.py` — call the per-frame overlay
+  render function on a synthetic blank frame with a known annotation
+  state (origin, current, trail). Assert that pixels at the expected
+  arrow-head and origin-crosshair locations have non-default colors.
+  **No GUI loop test.**
 - `tests/test_analyze_annotations.py` —
   - Construct synthetic annotation rows with a known phase sequence and
     known cycle period (e.g., 30 frames per cycle × 4 cycles). Assert
@@ -248,11 +313,13 @@ Per the project rule (CLAUDE.md §Testing Requirements):
 
 ```
 tools/
-  annotate_point.py        (new)
-  analyze_annotations.py   (new)
+  annotate_point.py            (new)
+  playback_annotations.py      (new)
+  analyze_annotations.py       (new)
 tests/
-  test_annotate_point.py        (new)
-  test_analyze_annotations.py   (new)
+  test_annotate_point.py            (new)
+  test_playback_annotations.py      (new)
+  test_analyze_annotations.py       (new)
 ```
 
 No changes to `src/`. The CV pipeline stays offline, in `tools/`.
