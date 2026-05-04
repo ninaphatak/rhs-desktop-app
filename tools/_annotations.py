@@ -49,3 +49,40 @@ def write_annotations(rows: Iterable[Annotation], path: Path) -> None:
         writer.writerow(CSV_HEADER)
         for r in rows_sorted:
             writer.writerow([r.frame_idx, r.point_x, r.point_y, r.phase])
+
+
+def read_annotations(path: Path) -> list[Annotation]:
+    """Read annotations from CSV at `path`.
+
+    Returns an empty list if the file does not exist. Rows are returned
+    in ascending frame_idx order. Raises ValueError on malformed input.
+    """
+    if not Path(path).exists():
+        return []
+
+    rows: list[Annotation] = []
+    seen_frames: set[int] = set()
+    with open(path, "r", newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if tuple(header or ()) != CSV_HEADER:
+            raise ValueError(f"Bad header in {path}: {header!r}")
+        for line_no, raw in enumerate(reader, start=2):
+            if len(raw) != 4:
+                raise ValueError(f"{path}:{line_no}: expected 4 columns, got {len(raw)}")
+            try:
+                frame_idx = int(raw[0])
+                px = int(raw[1])
+                py = int(raw[2])
+            except ValueError as e:
+                raise ValueError(f"{path}:{line_no}: non-integer field: {e}") from e
+            phase = raw[3]
+            if phase not in VALID_PHASES:
+                raise ValueError(f"{path}:{line_no}: invalid phase {phase!r}")
+            if frame_idx in seen_frames:
+                raise ValueError(f"{path}:{line_no}: duplicate frame_idx {frame_idx}")
+            seen_frames.add(frame_idx)
+            rows.append(Annotation(frame_idx=frame_idx, point_x=px, point_y=py, phase=phase))
+
+    rows.sort(key=lambda r: r.frame_idx)
+    return rows

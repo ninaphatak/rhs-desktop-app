@@ -52,3 +52,23 @@ def test_write_annotations_sorts_by_frame_idx(tmp_path):
     lines = out.read_text().splitlines()
     assert lines[1].startswith("12,")
     assert lines[2].startswith("14,")
+
+
+def test_read_annotations_round_trip(tmp_path):
+    from tools._annotations import write_annotations, read_annotations
+
+    rows = [
+        Annotation(frame_idx=12, point_x=412, point_y=305, phase="opening"),
+        Annotation(frame_idx=14, point_x=418, point_y=312, phase="open"),
+        Annotation(frame_idx=20, point_x=425, point_y=320, phase="closing"),
+    ]
+    out = tmp_path / "ann.csv"
+    write_annotations(rows, out)
+
+    loaded = read_annotations(out)
+    assert loaded == rows
+
+
+def test_read_annotations_missing_file_returns_empty_list(tmp_path):
+    from tools._annotations import read_annotations
+    assert read_annotations(tmp_path / "nope.csv") == []
