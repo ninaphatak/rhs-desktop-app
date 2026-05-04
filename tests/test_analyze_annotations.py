@@ -20,6 +20,7 @@ from tools.analyze_annotations import (
     aggregate_cycles,
     sample_flow_at_point,
     compare_flow_to_manual,
+    count_incomplete_cycle_attempts,
 )
 
 
@@ -255,3 +256,33 @@ def test_compare_flow_to_manual_skips_missing_flow():
     assert result["n_pairs"] == 0
     assert result["n_pairs_skipped_nonconsecutive"] == 0
     assert result["n_pairs_skipped_no_flow"] == 1
+
+
+def test_count_incomplete_cycle_attempts():
+    rows = [
+        _ann(0, 0, 0, "closed"),
+        _ann(2, 0, 0, "opening"),
+        _ann(4, 0, 0, "closing"),   # missing `open` -> failed start at frame 0
+        _ann(6, 0, 0, "closed"),
+        _ann(8, 0, 0, "opening"),
+        _ann(10, 0, 0, "open"),
+        _ann(12, 0, 0, "closing"),
+        _ann(14, 0, 0, "closed"),   # one valid cycle: 6 -> 14
+    ]
+    assert count_incomplete_cycle_attempts(rows) == 1
+
+
+def test_aggregate_cycles_includes_n_cycles_incomplete():
+    rows = [
+        _ann(0, 0, 0, "closed"),
+        _ann(2, 0, 0, "opening"),
+        _ann(4, 0, 0, "open"),
+        _ann(6, 0, 0, "closing"),
+        _ann(8, 0, 0, "closed"),
+    ]
+    cycles = detect_cycles(rows)
+    agg = aggregate_cycles(cycles, fps=30.0, n_incomplete=3)
+    assert agg["n_cycles_incomplete"] == 3
+    # Existing keys remain.
+    assert "n_cycles_complete" in agg
+    assert "cv_cycle_period_ms" in agg

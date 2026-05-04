@@ -101,6 +101,63 @@ def detect_cycles(rows: Sequence[Annotation]) -> list[Cycle]:
     return cycles
 
 
+def count_incomplete_cycle_attempts(rows: Sequence[Annotation]) -> int:
+    """Count cycle-start attempts that failed phase-sequence validation.
+
+    A "failed start" is a `closed` annotation that did NOT successfully
+    open a complete cycle. `detect_cycles` already discards these; this
+    helper recomputes them so the caller can report attempted vs successful
+    cycle counts (useful for sanity-checking annotation quality).
+
+    A `closed` annotation that is the terminator of a successful cycle is
+    NOT counted as a failed start, even though `detect_cycles` re-uses it
+    as the leading `closed` of the next attempt — semantically it already
+    "succeeded" once and shouldn't double-count when no further rows exist
+    (or when the next cycle attempt fails).
+
+    NOTE: this duplicates the walker logic from `detect_cycles`. Extracting
+    a shared walker is over-engineering for two callers — keep the two
+    implementations in sync if either is modified.
+    """
+    rows = sorted(rows, key=lambda r: r.frame_idx)
+    n = len(rows)
+    incomplete = 0
+    last_success_terminator_idx = -1
+    i = 0
+    while i < n:
+        while i < n and rows[i].phase != "closed":
+            i += 1
+        if i >= n:
+            break
+        start_idx = i
+        token_idx = 1
+        j = start_idx + 1
+        ok = True
+        while token_idx < len(_PHASE_SEQUENCE):
+            if j >= n:
+                ok = False
+                break
+            phase = rows[j].phase
+            if phase == _PHASE_SEQUENCE[token_idx]:
+                token_idx += 1
+                j += 1
+            elif phase == _PHASE_SEQUENCE[token_idx - 1]:
+                j += 1
+            else:
+                ok = False
+                break
+        if ok:
+            last_success_terminator_idx = j - 1
+            i = j - 1
+        else:
+            # Don't count the terminator of a previously-successful cycle as
+            # a failed start — it's already accounted for as a success.
+            if start_idx != last_success_terminator_idx:
+                incomplete += 1
+            i = start_idx + 1
+    return incomplete
+
+
 def cycle_period_ms(cycle: Cycle, fps: float) -> float:
     """Cycle duration in milliseconds (peak-to-peak interval).
 
@@ -143,8 +200,13 @@ def _cv(mean: float, std: float) -> float:
     return 0.0 if mean == 0 else std / mean
 
 
-def aggregate_cycles(cycles: Sequence[Cycle], fps: float) -> dict:
-    """Aggregate per-cycle metrics across complete cycles."""
+def aggregate_cycles(cycles: Sequence[Cycle], fps: float, *, n_incomplete: int = 0) -> dict:
+    """Aggregate per-cycle metrics across complete cycles.
+
+    `n_incomplete` is the count of cycle-start attempts that failed phase-sequence
+    validation (see `count_incomplete_cycle_attempts`). It is reported as
+    `n_cycles_incomplete` so callers can sanity-check annotation quality.
+    """
     periods = [cycle_period_ms(c, fps) for c in cycles]
     peaks = [peak_displacement_px(c) for c in cycles]
     paths = [path_length_px(c) for c in cycles]
@@ -155,6 +217,7 @@ def aggregate_cycles(cycles: Sequence[Cycle], fps: float) -> dict:
 
     return {
         "n_cycles_complete": len(cycles),
+        "n_cycles_incomplete": n_incomplete,
         "mean_cycle_period_ms": p_mean,
         "std_cycle_period_ms": p_std,
         "cv_cycle_period_ms": _cv(p_mean, p_std),
@@ -260,10 +323,12 @@ def main() -> None:
         sys.exit(1)
     rows = read_annotations(args.annotations)
     cycles = detect_cycles(rows)
-    agg = aggregate_cycles(cycles, fps=args.fps)
+    n_incomplete = count_incomplete_cycle_attempts(rows)
+    agg = aggregate_cycles(cycles, fps=args.fps, n_incomplete=n_incomplete)
 
     print("=== Mode A: cycle metrics ===")
-    print(f"n_cycles_complete = {agg['n_cycles_complete']}")
+    print(f"n_cycles_complete   = {agg['n_cycles_complete']}")
+    print(f"n_cycles_incomplete = {agg['n_cycles_incomplete']}")
     print(f"cycle_period_ms      mean={agg['mean_cycle_period_ms']:.1f}  "
           f"std={agg['std_cycle_period_ms']:.1f}  CV={agg['cv_cycle_period_ms']:.4f}")
     print(f"peak_displacement_px mean={agg['mean_peak_displacement_px']:.2f}  "
@@ -282,6 +347,17 @@ def main() -> None:
         if not cap.isOpened():
             print(f"Cannot open video: {args.video}", file=sys.stderr)
             sys.exit(1)
+
+        video_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+        if video_fps > 0:
+            rel_err = abs(video_fps - args.fps) / args.fps
+            if rel_err > 0.05:
+                print(
+                    f"warning: --fps={args.fps} disagrees with video reported FPS "
+                    f"({video_fps:.2f}). Mode A period and CV will be {args.fps / video_fps:.2f}x off "
+                    f"if --fps is wrong. Pass --fps {video_fps:.0f} to match the video.",
+                    file=sys.stderr,
+                )
 
         consecutive_pairs = [
             (a.frame_idx, b.frame_idx)
