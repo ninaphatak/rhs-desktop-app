@@ -6,6 +6,9 @@ a sparse CSV next to the input video.
 
 Usage:
     python tools/annotate_point.py path/to/recording.mp4
+
+Note: a click without a subsequent phase keypress defaults to phase=closed
+to keep half-labeled CSVs conservative for downstream cycle analysis.
 """
 
 from __future__ import annotations
@@ -21,7 +24,6 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools._annotations import (
     Annotation,
-    VALID_PHASES,
     read_annotations,
     write_annotations,
 )
@@ -120,7 +122,7 @@ def main() -> None:
         if state.click is not None:
             x, y = state.click
             existing = state.by_frame.get(state.frame_idx)
-            phase = existing.phase if existing else "open"
+            phase = existing.phase if existing else "closed"
             state.by_frame[state.frame_idx] = Annotation(
                 frame_idx=state.frame_idx, point_x=x, point_y=y, phase=phase,
             )
