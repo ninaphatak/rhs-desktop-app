@@ -192,12 +192,61 @@ def sample_flow_at_point(flow: "np.ndarray", x: float, y: float) -> tuple[float,
     return float(fx), float(fy)
 
 
+def compare_flow_to_manual(
+    rows: Sequence[Annotation],
+    flow_provider: "dict[tuple[int, int], np.ndarray]",
+) -> dict:
+    """Compare Farneback flow at each labeled point to the manual displacement.
+
+    `flow_provider` maps `(prev_frame_idx, curr_frame_idx)` -> flow field of
+    shape (H, W, 2). The caller is responsible for computing/loading these
+    flow fields lazily (they are large). Only consecutive frame pairs
+    (curr - prev == 1) are evaluated.
+
+    Returns a dict with `n_pairs`, `n_pairs_skipped_nonconsecutive`,
+    `median_error_px`, `p95_error_px`.
+    """
+    import numpy as np
+    rows = sorted(rows, key=lambda r: r.frame_idx)
+    errors: list[float] = []
+    skipped = 0
+
+    for a, b in zip(rows, rows[1:]):
+        if b.frame_idx - a.frame_idx != 1:
+            skipped += 1
+            continue
+        manual_dx = b.point_x - a.point_x
+        manual_dy = b.point_y - a.point_y
+        flow = flow_provider.get((a.frame_idx, b.frame_idx))
+        if flow is None:
+            skipped += 1
+            continue
+        fx, fy = sample_flow_at_point(flow, a.point_x, a.point_y)
+        err = math.hypot(fx - manual_dx, fy - manual_dy)
+        errors.append(err)
+
+    if not errors:
+        return {
+            "n_pairs": 0,
+            "n_pairs_skipped_nonconsecutive": skipped,
+            "median_error_px": 0.0,
+            "p95_error_px": 0.0,
+        }
+    arr = np.array(errors)
+    return {
+        "n_pairs": len(errors),
+        "n_pairs_skipped_nonconsecutive": skipped,
+        "median_error_px": float(np.median(arr)),
+        "p95_error_px": float(np.percentile(arr, 95)),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("annotations", type=Path,
                         help="Path to the annotations CSV.")
     parser.add_argument("--video", type=Path, default=None,
-                        help="Source MP4 (reserved for Mode B Farneback comparison; not yet implemented).")
+                        help="Source MP4. When provided, runs Mode B: Farneback dense-flow vs manual displacement at each labeled point.")
     parser.add_argument("--fps", type=float, default=30.0,
                         help="Frame rate for period calculation (default 30).")
     args = parser.parse_args()
@@ -218,8 +267,53 @@ def main() -> None:
     print(f"path_length_px       mean={agg['mean_path_length_px']:.2f}  "
           f"std={agg['std_path_length_px']:.2f}  CV={agg['cv_path_length_px']:.4f}")
 
+    sidecar: dict = {"mode_a": agg}
+
+    if args.video is not None:
+        if not args.video.exists():
+            print(f"Video not found: {args.video}", file=sys.stderr)
+            sys.exit(1)
+        import cv2
+        cap = cv2.VideoCapture(str(args.video))
+        if not cap.isOpened():
+            print(f"Cannot open video: {args.video}", file=sys.stderr)
+            sys.exit(1)
+
+        FARNEBACK_PARAMS = dict(
+            pyr_scale=0.5, levels=3, winsize=15,
+            iterations=3, poly_n=5, poly_sigma=1.2, flags=0,
+        )
+        consecutive_pairs = [
+            (a.frame_idx, b.frame_idx)
+            for a, b in zip(rows, rows[1:])
+            if b.frame_idx - a.frame_idx == 1
+        ]
+        flow_provider: dict = {}
+        for prev_idx, curr_idx in consecutive_pairs:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, prev_idx)
+            ret_p, prev_frame = cap.read()
+            cap.set(cv2.CAP_PROP_POS_FRAMES, curr_idx)
+            ret_c, curr_frame = cap.read()
+            if not (ret_p and ret_c):
+                continue
+            prev_g = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+            curr_g = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
+            flow_provider[(prev_idx, curr_idx)] = cv2.calcOpticalFlowFarneback(
+                prev_g, curr_g, None, **FARNEBACK_PARAMS,
+            )
+        cap.release()
+
+        flow_result = compare_flow_to_manual(rows, flow_provider)
+        sidecar["mode_b"] = flow_result
+
+        print("\n=== Mode B: dense-flow point-tracking accuracy ===")
+        print(f"n_pairs                      = {flow_result['n_pairs']}")
+        print(f"n_pairs_skipped_nonconsec    = {flow_result['n_pairs_skipped_nonconsecutive']}")
+        print(f"median_error_px              = {flow_result['median_error_px']:.3f}")
+        print(f"p95_error_px                 = {flow_result['p95_error_px']:.3f}")
+
     out_json = args.annotations.with_suffix(".analysis.json")
-    out_json.write_text(json.dumps({"mode_a": agg}, indent=2))
+    out_json.write_text(json.dumps(sidecar, indent=2))
     print(f"\nWrote {out_json}")
 
 

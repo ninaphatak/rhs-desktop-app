@@ -19,6 +19,7 @@ from tools.analyze_annotations import (
     peak_displacement_px,
     aggregate_cycles,
     sample_flow_at_point,
+    compare_flow_to_manual,
 )
 
 
@@ -201,3 +202,42 @@ def test_sample_flow_at_point_clamps_to_bounds():
     fx, fy = sample_flow_at_point(flow, 100, 100)
     assert math.isclose(fx, 1.0)
     assert math.isclose(fy, 2.0)
+
+
+def test_compare_flow_to_manual_zero_error_when_flow_matches():
+    """A flow field that exactly matches the manual displacement gives zero error."""
+    rows = [
+        _ann(0, 100, 100, "closed"),
+        _ann(1, 105, 103, "opening"),
+    ]
+    h, w = 200, 200
+    flow = np.full((h, w, 2), [5.0, 3.0], dtype=np.float32)
+    flow_provider = {(0, 1): flow}
+    result = compare_flow_to_manual(rows, flow_provider)
+    assert result["n_pairs"] == 1
+    assert result["n_pairs_skipped_nonconsecutive"] == 0
+    assert math.isclose(result["median_error_px"], 0.0, abs_tol=1e-6)
+
+
+def test_compare_flow_to_manual_known_offset():
+    """Flow off by (1, 0) -> per-pair error == 1 px."""
+    rows = [
+        _ann(0, 100, 100, "closed"),
+        _ann(1, 105, 103, "opening"),
+    ]
+    h, w = 200, 200
+    flow = np.full((h, w, 2), [4.0, 3.0], dtype=np.float32)  # off by (-1, 0)
+    flow_provider = {(0, 1): flow}
+    result = compare_flow_to_manual(rows, flow_provider)
+    assert math.isclose(result["median_error_px"], 1.0, abs_tol=1e-6)
+
+
+def test_compare_flow_to_manual_skips_nonconsecutive_pairs():
+    rows = [
+        _ann(0, 100, 100, "closed"),
+        _ann(5, 110, 100, "opening"),  # non-consecutive (gap of 5 frames)
+    ]
+    flow_provider: dict = {}
+    result = compare_flow_to_manual(rows, flow_provider)
+    assert result["n_pairs"] == 0
+    assert result["n_pairs_skipped_nonconsecutive"] == 1
