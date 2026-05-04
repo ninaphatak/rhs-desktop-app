@@ -125,3 +125,48 @@ def test_peak_displacement_px_is_max_distance_from_start():
     ]
     c = detect_cycles(rows)[0]
     assert math.isclose(peak_displacement_px(c), 10.0)
+
+
+from tools.analyze_annotations import aggregate_cycles
+
+
+def test_cv_zero_for_identical_cycles():
+    # Build identical 30-frame cycles. Each iteration appends the inner
+    # phase rows for one cycle (closed/opening/open/closing); the final
+    # `closed` after the loop terminates the last cycle. With 4 iterations
+    # plus the trailing closed, we get four `closed` boundaries spaced
+    # 30 frames apart -> 4 complete cycles, all with identical kinematics.
+    rows: list[Annotation] = []
+    for cycle_idx in range(4):
+        start = cycle_idx * 30
+        rows.extend([
+            _ann(start + 0, 0, 0, "closed"),
+            _ann(start + 7, 3, 4, "opening"),
+            _ann(start + 15, 6, 8, "open"),
+            _ann(start + 22, 3, 4, "closing"),
+        ])
+    rows.append(_ann(120, 0, 0, "closed"))
+
+    cycles = detect_cycles(rows)
+    assert len(cycles) >= 3
+
+    agg = aggregate_cycles(cycles, fps=30.0)
+    assert agg["n_cycles_complete"] >= 3
+    assert math.isclose(agg["cv_cycle_period_ms"], 0.0, abs_tol=1e-9)
+    assert math.isclose(agg["cv_peak_displacement_px"], 0.0, abs_tol=1e-9)
+
+
+def test_cv_nonzero_for_varied_periods():
+    rows = []
+    for start, length in [(0, 30), (30, 60)]:
+        rows.extend([
+            _ann(start, 0, 0, "closed"),
+            _ann(start + length // 4, 3, 4, "opening"),
+            _ann(start + length // 2, 6, 8, "open"),
+            _ann(start + 3 * length // 4, 3, 4, "closing"),
+        ])
+    rows.append(_ann(90, 0, 0, "closed"))
+    cycles = detect_cycles(rows)
+    assert len(cycles) == 2
+    agg = aggregate_cycles(cycles, fps=30.0)
+    assert agg["cv_cycle_period_ms"] > 0.0

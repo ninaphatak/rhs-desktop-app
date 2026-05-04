@@ -120,3 +120,77 @@ def peak_displacement_px(cycle: Cycle) -> float:
         return 0.0
     sx, sy = cycle.rows[0].point_x, cycle.rows[0].point_y
     return max(math.hypot(r.point_x - sx, r.point_y - sy) for r in cycle.rows)
+
+
+def _mean_std(values: Sequence[float]) -> tuple[float, float]:
+    if not values:
+        return 0.0, 0.0
+    n = len(values)
+    mean = sum(values) / n
+    if n == 1:
+        return mean, 0.0
+    var = sum((v - mean) ** 2 for v in values) / (n - 1)
+    return mean, math.sqrt(var)
+
+
+def _cv(mean: float, std: float) -> float:
+    return 0.0 if mean == 0 else std / mean
+
+
+def aggregate_cycles(cycles: Sequence[Cycle], fps: float) -> dict:
+    """Aggregate per-cycle metrics across complete cycles."""
+    periods = [cycle_period_ms(c, fps) for c in cycles]
+    peaks = [peak_displacement_px(c) for c in cycles]
+    paths = [path_length_px(c) for c in cycles]
+
+    p_mean, p_std = _mean_std(periods)
+    pk_mean, pk_std = _mean_std(peaks)
+    pl_mean, pl_std = _mean_std(paths)
+
+    return {
+        "n_cycles_complete": len(cycles),
+        "mean_cycle_period_ms": p_mean,
+        "std_cycle_period_ms": p_std,
+        "cv_cycle_period_ms": _cv(p_mean, p_std),
+        "mean_peak_displacement_px": pk_mean,
+        "std_peak_displacement_px": pk_std,
+        "cv_peak_displacement_px": _cv(pk_mean, pk_std),
+        "mean_path_length_px": pl_mean,
+        "std_path_length_px": pl_std,
+        "cv_path_length_px": _cv(pl_mean, pl_std),
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("annotations", type=Path,
+                        help="Path to the annotations CSV.")
+    parser.add_argument("--video", type=Path, default=None,
+                        help="Source MP4 (enables Mode B Farneback comparison).")
+    parser.add_argument("--fps", type=float, default=30.0,
+                        help="Frame rate for period calculation (default 30).")
+    args = parser.parse_args()
+
+    if not args.annotations.exists():
+        print(f"Annotations CSV not found: {args.annotations}")
+        sys.exit(1)
+    rows = read_annotations(args.annotations)
+    cycles = detect_cycles(rows)
+    agg = aggregate_cycles(cycles, fps=args.fps)
+
+    print("=== Mode A: cycle metrics ===")
+    print(f"n_cycles_complete = {agg['n_cycles_complete']}")
+    print(f"cycle_period_ms      mean={agg['mean_cycle_period_ms']:.1f}  "
+          f"std={agg['std_cycle_period_ms']:.1f}  CV={agg['cv_cycle_period_ms']:.4f}")
+    print(f"peak_displacement_px mean={agg['mean_peak_displacement_px']:.2f}  "
+          f"std={agg['std_peak_displacement_px']:.2f}  CV={agg['cv_peak_displacement_px']:.4f}")
+    print(f"path_length_px       mean={agg['mean_path_length_px']:.2f}  "
+          f"std={agg['std_path_length_px']:.2f}  CV={agg['cv_path_length_px']:.4f}")
+
+    out_json = args.annotations.with_suffix(".analysis.json")
+    out_json.write_text(json.dumps(agg, indent=2))
+    print(f"\nWrote {out_json}")
+
+
+if __name__ == "__main__":
+    main()
