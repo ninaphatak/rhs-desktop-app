@@ -10,7 +10,14 @@ import math
 import pytest
 
 from tools._annotations import Annotation
-from tools.analyze_annotations import detect_cycles, Cycle
+from tools.analyze_annotations import (
+    detect_cycles,
+    Cycle,
+    cycle_period_ms,
+    path_length_px,
+    peak_displacement_px,
+    aggregate_cycles,
+)
 
 
 def _ann(i: int, x: int, y: int, p: str) -> Annotation:
@@ -84,13 +91,6 @@ def test_detect_cycles_skips_out_of_order_phase_sequence():
     assert cycles[0].end_frame == 14
 
 
-from tools.analyze_annotations import (
-    cycle_period_ms,
-    path_length_px,
-    peak_displacement_px,
-)
-
-
 def test_cycle_period_ms_at_30fps():
     rows = [
         _ann(0, 0, 0, "closed"),
@@ -125,9 +125,6 @@ def test_peak_displacement_px_is_max_distance_from_start():
     ]
     c = detect_cycles(rows)[0]
     assert math.isclose(peak_displacement_px(c), 10.0)
-
-
-from tools.analyze_annotations import aggregate_cycles
 
 
 def test_cv_zero_for_identical_cycles():

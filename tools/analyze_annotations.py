@@ -101,7 +101,12 @@ def detect_cycles(rows: Sequence[Annotation]) -> list[Cycle]:
 
 
 def cycle_period_ms(cycle: Cycle, fps: float) -> float:
-    """Cycle duration in milliseconds, given the source-video frame rate."""
+    """Cycle duration in milliseconds (peak-to-peak interval).
+
+    Computed as `(end_frame - start_frame) / fps * 1000`. This is the
+    inter-event period (the gap between the two `closed` boundary frames),
+    NOT the number of frames spanned by the cycle's annotations.
+    """
     frames = cycle.end_frame - cycle.start_frame
     return (frames / fps) * 1000.0
 
@@ -166,13 +171,13 @@ def main() -> None:
     parser.add_argument("annotations", type=Path,
                         help="Path to the annotations CSV.")
     parser.add_argument("--video", type=Path, default=None,
-                        help="Source MP4 (enables Mode B Farneback comparison).")
+                        help="Source MP4 (reserved for Mode B Farneback comparison; not yet implemented).")
     parser.add_argument("--fps", type=float, default=30.0,
                         help="Frame rate for period calculation (default 30).")
     args = parser.parse_args()
 
     if not args.annotations.exists():
-        print(f"Annotations CSV not found: {args.annotations}")
+        print(f"Annotations CSV not found: {args.annotations}", file=sys.stderr)
         sys.exit(1)
     rows = read_annotations(args.annotations)
     cycles = detect_cycles(rows)
@@ -188,7 +193,7 @@ def main() -> None:
           f"std={agg['std_path_length_px']:.2f}  CV={agg['cv_path_length_px']:.4f}")
 
     out_json = args.annotations.with_suffix(".analysis.json")
-    out_json.write_text(json.dumps(agg, indent=2))
+    out_json.write_text(json.dumps({"mode_a": agg}, indent=2))
     print(f"\nWrote {out_json}")
 
 
