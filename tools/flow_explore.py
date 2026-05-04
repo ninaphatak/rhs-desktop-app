@@ -1,12 +1,20 @@
 """Dense optical flow explorer for valve camera footage.
 
-Visualizes Farneback dense optical flow as HSV overlay and magnitude heatmap.
-Pure exploration tool — no tracking, no measurements.
+Side-by-side display:
+  - Left:  original frame with a bright blue tint wherever motion is above
+           the threshold (anatomy still visible underneath).
+  - Right: pure binary motion mask (white where moving, black elsewhere).
+
+Direction is discarded and sub-threshold motion is hidden, so an entire
+moving leaflet glows uniformly. Threshold is the same control used by the
+dataset exporter (`tools/flow_export.py`).
 
 Usage:
     python tools/flow_explore.py path/to/valve_recording.avi
+    python tools/flow_explore.py path/to/valve_recording.avi --threshold 2.0
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -14,49 +22,74 @@ import cv2
 import numpy as np
 
 
-def compute_flow_hsv(flow: np.ndarray) -> np.ndarray:
-    """Convert optical flow field to HSV color image.
+DEFAULT_THRESHOLD_PX = 3.0  # scaled for 30 fps recordings (design doc cited 1.5 at 60 fps)
 
-    Hue = direction, Value = magnitude, Saturation = 255.
+FARNEBACK_PARAMS = dict(
+    pyr_scale=0.5, levels=3, winsize=15,
+    iterations=3, poly_n=5, poly_sigma=1.2, flags=0,
+)
+
+
+def compute_motion_mask(flow: np.ndarray, threshold_px: float) -> np.ndarray:
+    """Binary motion mask: 255 where |flow| >= threshold, 0 elsewhere.
+
+    Uniform brightness above the threshold so an entire moving region glows
+    at the same intensity, regardless of which pixels move fastest.
     """
-    mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-    hsv = np.zeros((*flow.shape[:2], 3), dtype=np.uint8)
-    hsv[..., 0] = ang * 180 / np.pi / 2  # hue: 0-179
-    hsv[..., 1] = 255  # saturation: constant
-    hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-
-
-def compute_magnitude_heatmap(flow: np.ndarray) -> np.ndarray:
-    """Convert optical flow to grayscale magnitude heatmap (white = high motion)."""
     mag = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
-    norm = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    return cv2.cvtColor(norm, cv2.COLOR_GRAY2BGR)
+    return ((mag >= threshold_px) * 255).astype(np.uint8)
 
 
-def draw_frame_counter(img: np.ndarray, frame_num: int, total_frames: int) -> None:
-    """Draw frame counter in top-left corner."""
-    text = f"Frame {frame_num}/{total_frames}"
-    cv2.putText(img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+def render_blue_overlay(frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Original frame with bright blue tint where the motion mask is on.
+
+    Anatomy stays visible underneath the tint (the camera is monochrome,
+    so the green/red channels carry the original luminance).
+    """
+    blue = np.zeros_like(frame)
+    blue[..., 0] = 255  # BGR: pure blue
+    blended = cv2.addWeighted(frame, 0.4, blue, 0.8, 0)
+    out = frame.copy()
+    out[mask > 0] = blended[mask > 0]
+    return out
+
+
+def draw_overlay(
+    img: np.ndarray,
+    frame_num: int,
+    total_frames: int,
+    threshold_px: float,
+) -> None:
+    """Frame counter + active threshold in top-left corner."""
+    cv2.putText(
+        img, f"Frame {frame_num}/{total_frames}", (10, 30),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
+    )
+    cv2.putText(
+        img, f"thr={threshold_px:.2f} px/frame", (10, 60),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
+    )
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: python tools/flow_explore.py <video_path>")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("video", type=Path, help="Path to recorded valve video")
+    parser.add_argument(
+        "--threshold", type=float, default=DEFAULT_THRESHOLD_PX,
+        help=f"Motion magnitude threshold in px/frame (default {DEFAULT_THRESHOLD_PX})",
+    )
+    args = parser.parse_args()
+
+    if not args.video.exists():
+        print(f"File not found: {args.video}")
         sys.exit(1)
 
-    video_path = Path(sys.argv[1])
-    if not video_path.exists():
-        print(f"File not found: {video_path}")
-        sys.exit(1)
-
-    cap = cv2.VideoCapture(str(video_path))
+    cap = cv2.VideoCapture(str(args.video))
     if not cap.isOpened():
-        print(f"Cannot open video: {video_path}")
+        print(f"Cannot open video: {args.video}")
         sys.exit(1)
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    frame_num = 0
 
     ret, prev_frame = cap.read()
     if not ret:
@@ -67,7 +100,10 @@ def main() -> None:
     frame_num = 1
     paused = False
 
-    print("Controls: SPACE=play/pause  RIGHT=step  q=quit")
+    print(
+        f"Controls: SPACE=play/pause  RIGHT=step  q=quit  "
+        f"(threshold={args.threshold} px/frame)"
+    )
 
     while True:
         advance = False
@@ -93,24 +129,17 @@ def main() -> None:
             curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
 
             flow = cv2.calcOpticalFlowFarneback(
-                prev_gray, curr_gray, None,
-                pyr_scale=0.5, levels=3, winsize=15,
-                iterations=3, poly_n=5, poly_sigma=1.2, flags=0
+                prev_gray, curr_gray, None, **FARNEBACK_PARAMS,
             )
 
-            # HSV flow overlay (semi-transparent on original)
-            flow_hsv = compute_flow_hsv(flow)
-            overlay = cv2.addWeighted(curr_frame, 0.5, flow_hsv, 0.5, 0)
+            mask = compute_motion_mask(flow, args.threshold)
+            overlay = render_blue_overlay(curr_frame, mask)
+            mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
-            # Magnitude heatmap
-            heatmap = compute_magnitude_heatmap(flow)
+            draw_overlay(overlay, frame_num, total_frames, args.threshold)
+            draw_overlay(mask_bgr, frame_num, total_frames, args.threshold)
 
-            # Draw frame counters
-            draw_frame_counter(overlay, frame_num, total_frames)
-            draw_frame_counter(heatmap, frame_num, total_frames)
-
-            # Side by side display
-            combined = np.hstack([overlay, heatmap])
+            combined = np.hstack([overlay, mask_bgr])
             cv2.imshow("Dense Optical Flow Explorer", combined)
 
             prev_gray = curr_gray
