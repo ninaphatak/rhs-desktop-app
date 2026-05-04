@@ -21,3 +21,34 @@ def test_annotation_construction():
     assert a.point_x == 412
     assert a.point_y == 305
     assert a.phase == "opening"
+
+
+def test_write_annotations_produces_expected_csv(tmp_path):
+    from tools._annotations import write_annotations
+
+    rows = [
+        Annotation(frame_idx=12, point_x=412, point_y=305, phase="opening"),
+        Annotation(frame_idx=14, point_x=418, point_y=312, phase="open"),
+    ]
+    out = tmp_path / "ann.csv"
+    write_annotations(rows, out)
+
+    text = out.read_text()
+    assert text.splitlines()[0] == "frame_idx,point_x,point_y,phase"
+    assert "12,412,305,opening" in text
+    assert "14,418,312,open" in text
+
+
+def test_write_annotations_sorts_by_frame_idx(tmp_path):
+    from tools._annotations import write_annotations
+
+    rows = [
+        Annotation(frame_idx=14, point_x=418, point_y=312, phase="open"),
+        Annotation(frame_idx=12, point_x=412, point_y=305, phase="opening"),
+    ]
+    out = tmp_path / "ann.csv"
+    write_annotations(rows, out)
+
+    lines = out.read_text().splitlines()
+    assert lines[1].startswith("12,")
+    assert lines[2].startswith("14,")

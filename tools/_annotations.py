@@ -28,3 +28,24 @@ class Annotation:
     point_x: int
     point_y: int
     phase: str
+
+
+import csv
+from pathlib import Path
+from typing import Iterable
+
+
+CSV_HEADER = ("frame_idx", "point_x", "point_y", "phase")
+
+
+def write_annotations(rows: Iterable[Annotation], path: Path) -> None:
+    """Write annotations to CSV at `path`, sorted ascending by frame_idx.
+
+    Overwrites any existing file at the path.
+    """
+    rows_sorted = sorted(rows, key=lambda r: r.frame_idx)
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(CSV_HEADER)
+        for r in rows_sorted:
+            writer.writerow([r.frame_idx, r.point_x, r.point_y, r.phase])
