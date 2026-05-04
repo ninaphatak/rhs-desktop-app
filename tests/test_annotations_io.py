@@ -72,3 +72,42 @@ def test_read_annotations_round_trip(tmp_path):
 def test_read_annotations_missing_file_returns_empty_list(tmp_path):
     from tools._annotations import read_annotations
     assert read_annotations(tmp_path / "nope.csv") == []
+
+
+def test_read_rejects_bad_phase(tmp_path):
+    from tools._annotations import read_annotations
+
+    p = tmp_path / "ann.csv"
+    p.write_text("frame_idx,point_x,point_y,phase\n12,1,2,wibble\n")
+    with pytest.raises(ValueError, match="invalid phase"):
+        read_annotations(p)
+
+
+def test_read_rejects_non_int_frame_idx(tmp_path):
+    from tools._annotations import read_annotations
+
+    p = tmp_path / "ann.csv"
+    p.write_text("frame_idx,point_x,point_y,phase\nabc,1,2,open\n")
+    with pytest.raises(ValueError, match="non-integer"):
+        read_annotations(p)
+
+
+def test_read_rejects_duplicate_frame_idx(tmp_path):
+    from tools._annotations import read_annotations
+
+    p = tmp_path / "ann.csv"
+    p.write_text(
+        "frame_idx,point_x,point_y,phase\n"
+        "12,1,2,open\n12,3,4,closed\n"
+    )
+    with pytest.raises(ValueError, match="duplicate"):
+        read_annotations(p)
+
+
+def test_read_rejects_bad_header(tmp_path):
+    from tools._annotations import read_annotations
+
+    p = tmp_path / "ann.csv"
+    p.write_text("idx,x,y,phase\n12,1,2,open\n")
+    with pytest.raises(ValueError, match="Bad header"):
+        read_annotations(p)
