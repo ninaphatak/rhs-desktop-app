@@ -79,3 +79,129 @@ def draw_overlay(frame: np.ndarray, state: OverlayState) -> np.ndarray:
     if state.current is not None:
         cv2.circle(out, state.current, 4, CURRENT_COLOR, -1)
     return out
+
+
+def _draw_hud(
+    frame: np.ndarray,
+    frame_idx: int,
+    total_frames: int,
+    state: OverlayState,
+    paused: bool,
+) -> None:
+    n = len(state.trail)
+    cv2.putText(
+        frame, f"Frame {frame_idx}/{total_frames - 1}",
+        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
+    )
+    cv2.putText(
+        frame, f"labeled_seen={n}",
+        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
+    )
+    if state.last_phase:
+        cv2.putText(
+            frame, f"phase={state.last_phase}",
+            (frame.shape[1] - 220, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
+        )
+    if paused:
+        cv2.putText(
+            frame, "PAUSED", (frame.shape[1] - 120, 60),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 200), 2,
+        )
+
+
+def _seek(cap: cv2.VideoCapture, frame_idx: int) -> np.ndarray | None:
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    ret, frame = cap.read()
+    return frame if ret else None
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("video", type=Path)
+    parser.add_argument("--annotations", type=Path, default=None)
+    parser.add_argument("--speed", type=float, default=1.0)
+    args = parser.parse_args()
+
+    if not args.video.exists():
+        print(f"File not found: {args.video}")
+        sys.exit(1)
+    csv_path = args.annotations or args.video.with_suffix(args.video.suffix + ".annotations.csv")
+
+    cap = cv2.VideoCapture(str(args.video))
+    if not cap.isOpened():
+        print(f"Cannot open video: {args.video}")
+        sys.exit(1)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    base_delay_ms = max(1, int(1000.0 / (fps * max(args.speed, 0.05))))
+
+    annotations = read_annotations(csv_path)
+    by_frame: dict[int, Annotation] = {a.frame_idx: a for a in annotations}
+    print(f"Loaded {len(annotations)} annotations from {csv_path}")
+    print("Controls: SPACE=play/pause  RIGHT=step  LEFT=back  r=restart  q=quit")
+
+    state = OverlayState()
+    frame_idx = 0
+    paused = False
+
+    def rebuild_state_up_to(target_idx: int) -> OverlayState:
+        s = OverlayState()
+        for i in sorted(by_frame.keys()):
+            if i > target_idx:
+                break
+            s.update(by_frame[i])
+        return s
+
+    frame = _seek(cap, frame_idx)
+    if frame is None:
+        print("Cannot read first frame")
+        sys.exit(1)
+    state = rebuild_state_up_to(frame_idx)
+
+    while True:
+        if frame_idx in by_frame:
+            state.update(by_frame[frame_idx])
+        overlaid = draw_overlay(frame, state)
+        _draw_hud(overlaid, frame_idx, total_frames, state, paused)
+        cv2.imshow(WINDOW, overlaid)
+
+        delay = 0 if paused else base_delay_ms
+        key = cv2.waitKey(delay) & 0xFF
+
+        if key == ord("q"):
+            break
+        elif key == ord(" "):
+            paused = not paused
+        elif key == ord("r"):
+            frame_idx = 0
+            state = rebuild_state_up_to(frame_idx)
+            new_frame = _seek(cap, frame_idx)
+            if new_frame is not None:
+                frame = new_frame
+            paused = True
+        elif paused and key in (83, ord("d")) and frame_idx + 1 < total_frames:
+            frame_idx += 1
+            new_frame = _seek(cap, frame_idx)
+            if new_frame is not None:
+                frame = new_frame
+        elif paused and key in (81, ord("a")) and frame_idx > 0:
+            frame_idx -= 1
+            state = rebuild_state_up_to(frame_idx)
+            new_frame = _seek(cap, frame_idx)
+            if new_frame is not None:
+                frame = new_frame
+        elif not paused:
+            if frame_idx + 1 >= total_frames:
+                paused = True
+                continue
+            frame_idx += 1
+            new_frame = _seek(cap, frame_idx)
+            if new_frame is not None:
+                frame = new_frame
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()
