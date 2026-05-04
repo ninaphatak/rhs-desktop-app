@@ -21,13 +21,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from tools._flow_params import FARNEBACK_PARAMS
+
 
 DEFAULT_THRESHOLD_PX = 3.0  # scaled for 30 fps recordings (design doc cited 1.5 at 60 fps)
-
-FARNEBACK_PARAMS = dict(
-    pyr_scale=0.5, levels=3, winsize=15,
-    iterations=3, poly_n=5, poly_sigma=1.2, flags=0,
-)
 
 
 def compute_motion_mask(flow: np.ndarray, threshold_px: float) -> np.ndarray:

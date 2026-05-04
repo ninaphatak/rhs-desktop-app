@@ -22,6 +22,7 @@ from typing import Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools._annotations import Annotation, read_annotations
+from tools._flow_params import FARNEBACK_PARAMS
 
 
 @dataclass
@@ -279,10 +280,6 @@ def main() -> None:
             print(f"Cannot open video: {args.video}", file=sys.stderr)
             sys.exit(1)
 
-        FARNEBACK_PARAMS = dict(
-            pyr_scale=0.5, levels=3, winsize=15,
-            iterations=3, poly_n=5, poly_sigma=1.2, flags=0,
-        )
         consecutive_pairs = [
             (a.frame_idx, b.frame_idx)
             for a, b in zip(rows, rows[1:])
