@@ -166,6 +166,32 @@ def aggregate_cycles(cycles: Sequence[Cycle], fps: float) -> dict:
     }
 
 
+def sample_flow_at_point(flow: "np.ndarray", x: float, y: float) -> tuple[float, float]:
+    """Bilinearly sample a 2-channel flow field at sub-pixel `(x, y)`.
+
+    `flow` is shape (H, W, 2) with channel 0 = dx, channel 1 = dy. Out-of-bounds
+    coordinates are clamped to the nearest in-bounds pixel.
+    """
+    import numpy as np
+    h, w = flow.shape[:2]
+    # Clamp to [0, w-1] x [0, h-1].
+    x = max(0.0, min(float(x), w - 1))
+    y = max(0.0, min(float(y), h - 1))
+    x0 = int(math.floor(x))
+    y0 = int(math.floor(y))
+    x1 = min(x0 + 1, w - 1)
+    y1 = min(y0 + 1, h - 1)
+    tx = x - x0
+    ty = y - y0
+    f00 = flow[y0, x0]
+    f10 = flow[y0, x1]
+    f01 = flow[y1, x0]
+    f11 = flow[y1, x1]
+    fx = (1 - ty) * ((1 - tx) * f00[0] + tx * f10[0]) + ty * ((1 - tx) * f01[0] + tx * f11[0])
+    fy = (1 - ty) * ((1 - tx) * f00[1] + tx * f10[1]) + ty * ((1 - tx) * f01[1] + tx * f11[1])
+    return float(fx), float(fy)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("annotations", type=Path,

@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import math
 
+import numpy as np
 import pytest
 
 from tools._annotations import Annotation
@@ -17,6 +18,7 @@ from tools.analyze_annotations import (
     path_length_px,
     peak_displacement_px,
     aggregate_cycles,
+    sample_flow_at_point,
 )
 
 
@@ -167,3 +169,35 @@ def test_cv_nonzero_for_varied_periods():
     assert len(cycles) == 2
     agg = aggregate_cycles(cycles, fps=30.0)
     assert agg["cv_cycle_period_ms"] > 0.0
+
+
+def test_sample_flow_at_point_bilinear():
+    # Build a 10x10 flow field where flow[y, x] = (x, y).
+    h, w = 10, 10
+    flow = np.zeros((h, w, 2), dtype=np.float32)
+    for y in range(h):
+        for x in range(w):
+            flow[y, x] = (float(x), float(y))
+
+    # At an exact pixel.
+    fx, fy = sample_flow_at_point(flow, 5, 7)
+    assert math.isclose(fx, 5.0)
+    assert math.isclose(fy, 7.0)
+
+    # At a sub-pixel location: flow varies linearly with x and y, so bilinear
+    # interpolation should give the exact (x, y).
+    fx, fy = sample_flow_at_point(flow, 5.25, 7.75)
+    assert math.isclose(fx, 5.25, abs_tol=1e-6)
+    assert math.isclose(fy, 7.75, abs_tol=1e-6)
+
+
+def test_sample_flow_at_point_clamps_to_bounds():
+    flow = np.zeros((10, 10, 2), dtype=np.float32)
+    flow[:, :] = (1.0, 2.0)
+    # Out-of-bounds: should clamp rather than crash.
+    fx, fy = sample_flow_at_point(flow, -5, -5)
+    assert math.isclose(fx, 1.0)
+    assert math.isclose(fy, 2.0)
+    fx, fy = sample_flow_at_point(flow, 100, 100)
+    assert math.isclose(fx, 1.0)
+    assert math.isclose(fy, 2.0)
