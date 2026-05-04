@@ -58,35 +58,47 @@ pytest tests/ -v       # Run tests
 
 ## CV Pipeline — Current State
 
-**Status: DATASET EXPORT PHASE** (pivot from in-app tracker)
+**Status: POINT-ANNOTATION + PHASE-TIMING VALIDATION** (supersedes polygon IoU + cycle-period FFT framing)
 
-**Approach:** Produce a structured per-frame **dense optical flow dataset** from recorded valve videos as a handoff artifact for Dr. Lee / a downstream researcher (annotation, CNN training, further analysis). No live in-app tracker. The CV work lives entirely in `tools/` — the app itself stays a read-only sensor monitor.
+**Approach:** The CV deliverable is a *validated point-tracker accuracy number* plus a *cardiac-cycle reproducibility characterization*. The user manually labels one anatomical landmark on a leaflet and the cardiac phase ({open, opening, closing, closed}) frame-by-frame; from that sparse-but-honest ground truth we derive (1) dense-flow point-tracking accuracy, (2) CV of cycle period across cycles, (3) CV of per-cycle peak landmark displacement. No orifice-area proxies, no flow-rate analogues, no Arduino FLOW comparison. The CV work lives entirely in `tools/` — the app itself stays a read-only sensor monitor.
 
-**Why the pivot:** Sparse LK on boundary points (`tools/leaflet_flow_test.py`) did not produce reliable tracks on actual footage — the textureless white silicone surface and bubble noise described in PRD §5.6 hurt LK too, not just dense-flow-on-surface. Farneback dense flow at the **orifice boundary** (donut ROI — NOT the leaflet surface interior) qualitatively tracks leaflet motion and can be packaged as a dataset.
+**Why the latest pivot:** The earlier validation plan tried to characterize the whole valve from the dense flow field — IoU between flow-derived contours and hand-drawn polygons, plus FFT period-match against commanded HR. Both metrics are coarse and neither tells us how well dense optical flow tracks an *identifiable physical landmark* over time. Manual labels at a single landmark give a much tighter accuracy number and double as ground truth for kinematic regularity (cycle period CV, per-cycle peak-displacement CV).
 
-**What's decided:**
-- Dense Farneback inside a donut ROI around the orifice. Not on the textureless leaflet interior — PRD §5.6's rejection stands for the interior; regularization-propagated flow there is hallucinated.
+**Why donut-ROI Farneback still applies:** Dense Farneback at the orifice boundary (donut ROI, NOT the leaflet surface interior — PRD §5.6's rejection stands) qualitatively tracks leaflet motion. The exporter that produces the HDF5 dataset is unchanged; only the validation methodology pivoted.
+
+**What's shipped (this branch):**
+- `tools/annotate_point.py` — manual single-landmark annotator with per-frame phase label, OpenCV window, click + keyboard. Auto-resumes from `<video>.annotations.csv`.
+- `tools/playback_annotations.py` — visualization that animates the labeled trajectory on the source video with origin crosshair, current marker, displacement vector arrow, cumulative gray trail, and persistent phase label.
+- `tools/analyze_annotations.py` — cycle detection (closed → opening → open → closing → closed), per-cycle period and peak displacement, CV aggregates across cycles, optional Mode B that computes Farneback dense flow at each annotated point and reports median/p95 error vs the manual displacement.
+- `tools/_annotations.py` — shared `Annotation` dataclass + CSV I/O (header, sparse rows, sorted `frame_idx`, malformed-phase rejection on load).
+- `tools/_flow_params.py` — hoisted Farneback params shared between the exporter and the analyzer.
+
+**What's decided (dataset exporter, unchanged):**
+- Dense Farneback inside a donut ROI around the orifice. Not on the textureless leaflet interior.
 - Fixed absolute-magnitude threshold on saved flow fields. No `NORM_MINMAX` in saved data.
-- HDF5 handoff format. Core `session.h5` = grayscale frames + motion masks + contours + metadata. Optional `flow.h5` sidecar = raw dense flow (large).
+- HDF5 handoff format. Core `session.h5` = grayscale frames + motion masks + contours + metadata. Optional `flow.h5` sidecar = raw dense flow.
 - Both 0° and 30° cameras supported by the same exporter (`--camera` CLI arg).
 - Hardcoded Farneback params (winsize=21, poly_n=7, poly_sigma=1.5, OPTFLOW_FARNEBACK_GAUSSIAN) + CLAHE preprocessing + morph cleanup, stamped into HDF5 attrs for reproducibility.
 
-**What's in progress:**
-- `tools/flow_export.py` — CLI exporter (to be built). See `docs/plans/2026-04-20-flow-export-plan.md`.
-- Phase 0 validation: correlate donut-ROI mean flow magnitude vs Arduino FLOW channel. Gate the build on r² ≥ 0.5.
-- New recordings from both cameras scheduled (valve cycling with motion).
+**Validation framing (current):**
+- NOT polygon IoU, NOT cycle-period FFT, NOT motion-mask area as a "valve open-ness" proxy.
+- The dataset is a manually-labeled point trajectory with phase labels. The metrics are CV of cycle period, CV of per-cycle peak displacement, plus median + p95 error of dense optical flow at the manually-tracked landmark.
 
-**Planned (after exporter ships):**
-- `tools/annotate_leaflets.py` — lightweight polygon annotator (~30-50 frames).
-- `tools/param_sweep.py` + `tools/_metrics.py` — parameter grid (winsize × threshold × donut) run across the same video, metrics computed per run.
-- `tools/validation_report.py` — produces IoU/Arduino-correlation heatmaps + `docs/validation_results.md`.
-- This validation study turns the deliverable from "data pipeline" into "validated optical flow pipeline with parameter-sensitivity analysis" — the research framing for Dr. Lee. **"Reconstruction" here = motion reconstruction (flow vs Arduino sensor, flow-derived contours vs annotations), NOT 3D/SfM.**
+**Deferred (waiting on first annotated session):**
+- `tools/flow_export.py` — CLI exporter; spec at `docs/plans/2026-04-20-flow-export-plan.md`.
+- `tools/param_sweep.py` — parameter grid (winsize × threshold × donut). Revisit after first annotated session — the new metrics may suggest a different sweep target than mean IoU.
+- `tools/validation_report.py` — figure assembly + `docs/validation_results.md`.
+
+**Killed (do not build):**
+- `tools/annotate_leaflets.py` (polygon annotator) — superseded by `tools/annotate_point.py`.
+- `tools/_metrics.py` cycle-period FFT helpers — cycle metrics now live in `tools/analyze_annotations.py`, derived from phase labels rather than FFT.
+- Arduino FLOW correlation as a validation gate (see `2026-05-01-flow-export-amendment.md`).
 
 **Deprecated but retained for reference:**
 - `tools/leaflet_flow_test.py` — LK prototype. Keep in repo; do not extend.
 - `src/core/leaflet_tracker.py` — never created; removed from the roadmap.
 
-> See `docs/plans/2026-04-20-flow-export-design.md` for full design rationale and `docs/PRD.md` for algorithm background and rejected alternatives.
+> See `docs/plans/2026-05-04-point-annotator-design.md` and `docs/plans/2026-05-04-point-annotator-plan.md` for the current validation pipeline. Earlier plans (`2026-04-20-flow-export-design.md`, `2026-04-20-flow-export-plan.md`, `2026-05-01-flow-export-amendment.md`) remain authoritative for the exporter itself; their validation sections are superseded.
 
 ## Testing Requirements
 Every new module or feature must have corresponding pytest tests. Run `pytest tests/ -v` before committing.

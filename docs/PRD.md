@@ -250,7 +250,19 @@ The RHS does not meet the FDA Section 201(h) medical device definition — it is
 | Plot dialog | ✅ Done | In-app visualization |
 | Mock data | ✅ Done | Arduino + camera mocks |
 | Setup scripts | ✅ Done | setup.sh/bat, run.sh/bat, hash-check for deps |
-| Dense flow exploration | 🔨 In Progress | `tools/flow_explore.py` — needs recorded AVI |
-| Leaflet tracker | ⬜ Not Started | `src/core/leaflet_tracker.py` — after exploration |
-| Leaflet tracking UI | ⬜ Not Started | Point overlay, displacement plots |
+| Dense flow exploration | ✅ Done | `tools/flow_explore.py` — threshold-based motion mask on recorded MP4 |
+| Annotation CSV I/O module | ✅ Done | `tools/_annotations.py` — `Annotation` dataclass + CSV read/write + malformed-phase rejection |
+| Shared Farneback params | ✅ Done | `tools/_flow_params.py` — hoisted from exporter for reuse by analyzer |
+| Point + phase annotator | ✅ Done | `tools/annotate_point.py` — manual landmark + per-frame phase label, OpenCV GUI. See `docs/plans/2026-05-04-point-annotator-design.md` and `2026-05-04-point-annotator-plan.md` |
+| Annotation playback | ✅ Done | `tools/playback_annotations.py` — animates labeled trajectory on source video with displacement vector + cumulative trail |
+| Cycle CV analyzer (Mode A) | ✅ Done | `tools/analyze_annotations.py` — cycle detection from phase labels, per-cycle period + peak displacement, CV across cycles |
+| Flow vs manual error (Mode B) | ✅ Done | `tools/analyze_annotations.py --video` — Farneback dense flow at annotated points, median + p95 error vs manual displacement |
+| HDF5 dataset exporter | ⬜ Deferred | `tools/flow_export.py` — design at `docs/plans/2026-04-20-flow-export-plan.md` |
+| Param sweep | ⬜ Deferred | Revisit after first annotated session — sweep target may change given new metrics |
+| Validation report | ⬜ Deferred | Figures + `docs/validation_results.md` after first sweep run |
+| Leaflet tracker (in-app) | ❌ Killed | CV work stays offline in `tools/`; `src/core/leaflet_tracker.py` removed from roadmap |
+| Polygon annotator | ❌ Killed | `tools/annotate_leaflets.py` superseded by `tools/annotate_point.py` |
+| Cycle-period FFT helpers | ❌ Killed | Cycle metrics now derived from phase labels in `tools/analyze_annotations.py`, not FFT |
 | Stereo calibration | ⬜ Not Started | Phase 2 stretch goal |
+
+**Validation framing (current, see `docs/plans/2026-05-04-point-annotator-design.md`):** the CV deliverable is a manually-labeled point trajectory with phase labels. The metrics are CV of cycle period, CV of per-cycle peak displacement, plus median + p95 error of dense optical flow at the manually-tracked landmark. NOT polygon IoU, NOT cycle-period FFT, NOT motion-mask-area as a valve-open-ness proxy. Earlier validation strategies in `2026-04-20-flow-export-design.md` and `2026-05-01-flow-export-amendment.md` are superseded on this point; the exporter design itself in those docs still applies.
