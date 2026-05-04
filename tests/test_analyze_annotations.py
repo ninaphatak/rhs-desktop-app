@@ -82,3 +82,46 @@ def test_detect_cycles_skips_out_of_order_phase_sequence():
     assert len(cycles) == 1
     assert cycles[0].start_frame == 6
     assert cycles[0].end_frame == 14
+
+
+from tools.analyze_annotations import (
+    cycle_period_ms,
+    path_length_px,
+    peak_displacement_px,
+)
+
+
+def test_cycle_period_ms_at_30fps():
+    rows = [
+        _ann(0, 0, 0, "closed"),
+        _ann(15, 0, 0, "opening"),
+        _ann(30, 0, 0, "open"),
+        _ann(45, 0, 0, "closing"),
+        _ann(60, 0, 0, "closed"),
+    ]
+    c = detect_cycles(rows)[0]
+    assert math.isclose(cycle_period_ms(c, fps=30.0), 2000.0)
+
+
+def test_path_length_px_sums_consecutive_distances():
+    rows = [
+        _ann(0, 0, 0, "closed"),
+        _ann(1, 3, 4, "opening"),    # +5 px
+        _ann(2, 6, 8, "open"),       # +5 px
+        _ann(3, 6, 8, "closing"),    # +0 px
+        _ann(4, 0, 0, "closed"),     # +10 px
+    ]
+    c = detect_cycles(rows)[0]
+    assert math.isclose(path_length_px(c), 5.0 + 5.0 + 0.0 + 10.0)
+
+
+def test_peak_displacement_px_is_max_distance_from_start():
+    rows = [
+        _ann(0, 0, 0, "closed"),
+        _ann(1, 3, 4, "opening"),    # 5 from start
+        _ann(2, 6, 8, "open"),       # 10 from start (peak)
+        _ann(3, 3, 4, "closing"),    # 5 from start
+        _ann(4, 0, 0, "closed"),     # 0 from start
+    ]
+    c = detect_cycles(rows)[0]
+    assert math.isclose(peak_displacement_px(c), 10.0)

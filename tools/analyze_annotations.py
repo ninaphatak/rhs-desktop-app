@@ -98,3 +98,25 @@ def detect_cycles(rows: Sequence[Annotation]) -> list[Cycle]:
             i = start_idx + 1
 
     return cycles
+
+
+def cycle_period_ms(cycle: Cycle, fps: float) -> float:
+    """Cycle duration in milliseconds, given the source-video frame rate."""
+    frames = cycle.end_frame - cycle.start_frame
+    return (frames / fps) * 1000.0
+
+
+def path_length_px(cycle: Cycle) -> float:
+    """Sum of pixel distances between consecutive annotated points in the cycle."""
+    total = 0.0
+    for a, b in zip(cycle.rows, cycle.rows[1:]):
+        total += math.hypot(b.point_x - a.point_x, b.point_y - a.point_y)
+    return total
+
+
+def peak_displacement_px(cycle: Cycle) -> float:
+    """Max distance from the cycle-start point to any point in the cycle."""
+    if not cycle.rows:
+        return 0.0
+    sx, sy = cycle.rows[0].point_x, cycle.rows[0].point_y
+    return max(math.hypot(r.point_x - sx, r.point_y - sy) for r in cycle.rows)
