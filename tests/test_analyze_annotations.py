@@ -241,3 +241,17 @@ def test_compare_flow_to_manual_skips_nonconsecutive_pairs():
     result = compare_flow_to_manual(rows, flow_provider)
     assert result["n_pairs"] == 0
     assert result["n_pairs_skipped_nonconsecutive"] == 1
+    assert result["n_pairs_skipped_no_flow"] == 0
+
+
+def test_compare_flow_to_manual_skips_missing_flow():
+    """Consecutive pair with no flow entry -> n_pairs_skipped_no_flow == 1."""
+    rows = [
+        _ann(0, 100, 100, "closed"),
+        _ann(1, 105, 103, "opening"),
+    ]
+    flow_provider: dict = {}  # consecutive but no flow data
+    result = compare_flow_to_manual(rows, flow_provider)
+    assert result["n_pairs"] == 0
+    assert result["n_pairs_skipped_nonconsecutive"] == 0
+    assert result["n_pairs_skipped_no_flow"] == 1

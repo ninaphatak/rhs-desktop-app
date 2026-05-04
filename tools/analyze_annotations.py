@@ -205,22 +205,23 @@ def compare_flow_to_manual(
     (curr - prev == 1) are evaluated.
 
     Returns a dict with `n_pairs`, `n_pairs_skipped_nonconsecutive`,
-    `median_error_px`, `p95_error_px`.
+    `n_pairs_skipped_no_flow`, `median_error_px`, `p95_error_px`.
     """
     import numpy as np
     rows = sorted(rows, key=lambda r: r.frame_idx)
     errors: list[float] = []
-    skipped = 0
+    skipped_nonconsec = 0
+    skipped_no_flow = 0
 
     for a, b in zip(rows, rows[1:]):
         if b.frame_idx - a.frame_idx != 1:
-            skipped += 1
+            skipped_nonconsec += 1
             continue
         manual_dx = b.point_x - a.point_x
         manual_dy = b.point_y - a.point_y
         flow = flow_provider.get((a.frame_idx, b.frame_idx))
         if flow is None:
-            skipped += 1
+            skipped_no_flow += 1
             continue
         fx, fy = sample_flow_at_point(flow, a.point_x, a.point_y)
         err = math.hypot(fx - manual_dx, fy - manual_dy)
@@ -229,14 +230,16 @@ def compare_flow_to_manual(
     if not errors:
         return {
             "n_pairs": 0,
-            "n_pairs_skipped_nonconsecutive": skipped,
+            "n_pairs_skipped_nonconsecutive": skipped_nonconsec,
+            "n_pairs_skipped_no_flow": skipped_no_flow,
             "median_error_px": 0.0,
             "p95_error_px": 0.0,
         }
     arr = np.array(errors)
     return {
         "n_pairs": len(errors),
-        "n_pairs_skipped_nonconsecutive": skipped,
+        "n_pairs_skipped_nonconsecutive": skipped_nonconsec,
+        "n_pairs_skipped_no_flow": skipped_no_flow,
         "median_error_px": float(np.median(arr)),
         "p95_error_px": float(np.percentile(arr, 95)),
     }
@@ -306,6 +309,7 @@ def main() -> None:
         print("\n=== Mode B: dense-flow point-tracking accuracy ===")
         print(f"n_pairs                      = {flow_result['n_pairs']}")
         print(f"n_pairs_skipped_nonconsec    = {flow_result['n_pairs_skipped_nonconsecutive']}")
+        print(f"n_pairs_skipped_no_flow      = {flow_result['n_pairs_skipped_no_flow']}")
         print(f"median_error_px              = {flow_result['median_error_px']:.3f}")
         print(f"p95_error_px                 = {flow_result['p95_error_px']:.3f}")
 
