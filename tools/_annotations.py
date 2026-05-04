@@ -7,10 +7,14 @@ analysis can run headless.
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
 
 
 VALID_PHASES: tuple[str, ...] = ("open", "opening", "closing", "closed")
+CSV_HEADER = ("frame_idx", "point_x", "point_y", "phase")
 
 
 @dataclass(frozen=True)
@@ -28,14 +32,6 @@ class Annotation:
     point_x: int
     point_y: int
     phase: str
-
-
-import csv
-from pathlib import Path
-from typing import Iterable
-
-
-CSV_HEADER = ("frame_idx", "point_x", "point_y", "phase")
 
 
 def write_annotations(rows: Iterable[Annotation], path: Path) -> None:
