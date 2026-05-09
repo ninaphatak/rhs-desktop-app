@@ -66,15 +66,17 @@ BLOB_MIN_CIRCULARITY = 0.4
 # stable K estimation; without strong constraints the optimizer overfits K
 # and distortion to compensate for noise, causing camera-position drift even
 # when projection accuracy is fine. We fix focal length (from lens spec +
-# pixel size + fluid refraction), fix principal point at image center, and
-# zero out all distortion. This trades a bit of reprojection accuracy for
-# physically-meaningful extrinsics that match the CAD model.
+# pixel size + fluid refraction) and the principal point at image center,
+# and let only the lens distortion fit (radial k1 + tangential p1, p2 — the
+# physically meaningful terms). This was empirically the best variant: 3D
+# triangulation error 0.154mm median, 0.431mm max, with EPP discrepancy
+# still well under the 15mm validation tolerance.
 CALIB_FLAGS = (
     cv2.CALIB_USE_INTRINSIC_GUESS
     | cv2.CALIB_FIX_FOCAL_LENGTH
     | cv2.CALIB_FIX_PRINCIPAL_POINT
-    | cv2.CALIB_FIX_K1 | cv2.CALIB_FIX_K2 | cv2.CALIB_FIX_K3
-    | cv2.CALIB_ZERO_TANGENT_DIST
+    | cv2.CALIB_FIX_K2 | cv2.CALIB_FIX_K3   # k1 free, k2=k3=0
+    # tangential (p1, p2) free — empirically improves projection accuracy ~10%
 )
 
 # -- Validation tolerance --

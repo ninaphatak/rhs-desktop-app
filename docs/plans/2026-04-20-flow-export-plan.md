@@ -1,11 +1,20 @@
 # Dense Optical Flow Dataset Exporter — Implementation Plan
 _2026-04-20_
 
+> **HISTORICAL — workstream killed 2026-05-08.** The HDF5 dataset
+> exporter described here was deprioritized when the CV deliverable
+> pivoted to direct metric (mm) leaflet displacement via stereo
+> calibration + triangulation. See
+> `docs/plans/2026-05-08-stereo-calibration-design.md` for the
+> active design. Camera-angle references were updated from "30°" to
+> "19.3°" for consistency with the as-built geometry, but
+> implementation steps below are no longer the active plan.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. See `2026-04-20-flow-export-design.md` for background.
 
 **Goal:** Ship a CLI tool at `tools/flow_export.py` that converts a valve MP4 into an HDF5 dataset (`session.h5` + optional `flow.h5` sidecar) for handoff to Dr. Lee or a downstream researcher.
 
-**Prerequisite:** Tomorrow's data collection (videos with actual valve motion from both 0° and 30° Basler cameras). Phase 0 validation runs against one of those.
+**Prerequisite:** Tomorrow's data collection (videos with actual valve motion from both 0° and 19.3° Basler cameras). Phase 0 validation runs against one of those.
 
 **Tech stack:** Python 3.11+, OpenCV, NumPy, h5py (new dep), pytest.
 
@@ -170,13 +179,13 @@ Preallocation note: HDF5 resizable datasets (`maxshape=(None, h, w)`) are simple
 **CLI:**
 
 ```
-python tools/flow_export.py <video_path> --camera {0deg,30deg} [options]
+python tools/flow_export.py <video_path> --camera {0deg,19_3deg} [options]
 
 Positional:
   video_path                    Path to input MP4
 
 Required:
-  --camera {0deg,30deg}         Which camera produced the video
+  --camera {0deg,19_3deg}         Which camera produced the video
 
 Options:
   --output PATH                 Output .h5 path. Default: <video_stem>_session.h5
@@ -244,7 +253,7 @@ Do NOT test Farneback's numerical output — trust OpenCV.
 3. If mask is too sparse (missing leaflet motion): drop threshold to 1.0.
 4. If mask is noisy with bubble speckle: raise to 2.0 or tighten `min_contour_area` to 800.
 5. Commit final threshold as the default after one visual QA pass.
-6. Repeat for 30° recording.
+6. Repeat for 19.3° recording.
 7. Zip up `session.h5 + flow.h5 + README_DATASET.md + source MP4` into a handoff folder for Dr. Lee.
 
 ---
@@ -286,7 +295,7 @@ Do NOT test Farneback's numerical output — trust OpenCV.
 - New: `tools/param_sweep.py`
 
 **Behavior:**
-- CLI: `python tools/param_sweep.py <video.mp4> --camera {0deg,30deg} --grid <grid.json>`
+- CLI: `python tools/param_sweep.py <video.mp4> --camera {0deg,19_3deg} --grid <grid.json>`
 - `grid.json` schema:
   ```json
   {

@@ -1,6 +1,15 @@
 # Dense Optical Flow Dataset Exporter — Design Doc
 _2026-04-20_
 
+> **HISTORICAL — workstream killed 2026-05-08.** The HDF5 dataset
+> exporter described here was deprioritized when the CV deliverable
+> pivoted to direct metric (mm) leaflet displacement via stereo
+> calibration + triangulation. See
+> `docs/plans/2026-05-08-stereo-calibration-design.md` for the
+> active design. Camera-angle references in this doc were updated
+> from "30°" to "19.3°" for consistency with the as-built geometry,
+> but the rest of the content reflects the original design intent.
+
 ## Problem
 
 The CV pipeline was originally scoped as sparse Lucas-Kanade tracking on leaflet boundary points, with `src/core/leaflet_tracker.py` as the integration target. The LK prototype (`tools/leaflet_flow_test.py`) did not produce reliable tracks on actual valve footage — points drift or lose lock through the open/close cycle, consistent with the textureless white silicone surface and bubble noise described in PRD §5.6.
@@ -64,14 +73,14 @@ Raw thresholded mask fragments badly because of bubble drift. Pipeline:
 `h5py` is the de-facto scientific Python format for large numerical arrays. Self-describing (`h5ls session.h5` prints schema), per-frame chunking gives random access with compression, and the library has been stable for 15+ years. One file per input video keeps the handoff atomic.
 
 ### 7. Both cameras supported via the same tool
-The 0° and 30° cameras are both producing recordings in the April data collection session. The exporter handles either — `camera_id` is a required CLI arg and gets stamped into the `.h5` attrs. No per-camera code branches.
+The 0° and 19.3° cameras are both producing recordings in the April data collection session. The exporter handles either — `camera_id` is a required CLI arg and gets stamped into the `.h5` attrs. No per-camera code branches.
 
 ## Data schema
 
 ### Core file: `session.h5`
 
 **Root attributes (global metadata):**
-- `camera_id` (str): `"0deg"` or `"30deg"`
+- `camera_id` (str): `"0deg"` or `"19_3deg"`
 - `fps` (float): source video frame rate
 - `frame_height`, `frame_width` (int): full-frame dimensions before ROI crop
 - `roi_crop_bbox` (int[4]): (x, y, w, h) applied to each frame
@@ -150,6 +159,6 @@ with h5py.File("session.h5", "r") as f:
 
 ## Open questions (to resolve after tomorrow's data collection)
 
-- Are the 30° recordings usable for the same pipeline, or does the viewing angle require a different donut ROI?
+- Are the 19.3° recordings usable for the same pipeline, or does the viewing angle require a different donut ROI?
 - What's the typical valve cycle length in the collected data — does 60s / 3600 frames still hold as a size-budget assumption?
 - Does the Phase 0 sanity check (flow vs Arduino FLOW) pass? If not, pivot to threshold-based orifice segmentation (PRD §5.4) instead of flow.
