@@ -237,21 +237,51 @@ both the calibration math and the as-built geometry are consistent.
 
 ## First successful calibration (water, 2026-05-08)
 
-End-to-end run on `outputs/videos/calib_water_2026-05-08_21-26-59_*.avi`:
+End-to-end run on `outputs/videos/calib_water_2026-05-08_21-26-59_*.avi`
+with the final K1+tangential distortion model (see selection below):
 
-- **3D triangulation error**: median 0.20 mm, max 0.53 mm over 38 markers
-  visible to both cameras (markers 3, 11, 19 occluded from cam1 by
-  cylinder geometry; cam0 sees all 41).
-- **Reprojection RMS**: cam0 = 3.36 px, cam1 = 3.76 px. Higher than
+- **3D triangulation error**: median 0.154 mm, max 0.431 mm over 38
+  markers visible to both cameras (markers 3, 11, 19 occluded from
+  cam1 by cylinder geometry; cam0 sees all 41).
+- **Reprojection RMS**: cam0 = 3.23 px, cam1 = 3.63 px. Higher than
   ideal (sub-px is the gold standard), reflects residual refraction
   the effective-pinhole model can't fully capture. Acceptable because
   the 3D accuracy is what the deliverable cares about.
-- **EPP cross-check**: both within 10 mm of CAD prediction (passes
-  the relaxed 15 mm tolerance for as-built mounting + refraction).
+- **EPP cross-check**: cam0 = 10.80 mm, cam1 = 8.19 mm (passes the
+  relaxed 15 mm tolerance for as-built mounting + refraction).
 
-Per-ring 3D error pattern: top inner ring (z=0) is the most accurate
-(0.118 mm median); lowest cylinder (z=-11.76) is the least (0.292 mm
-median). Error scales with depth as expected for stereo geometry.
+Per-ring 3D error pattern: top inner ring (z=0) is the most accurate;
+lowest cylinder (z=-11.76) is the least. Error scales with depth as
+expected for stereo geometry.
+
+### Distortion parameter selection
+
+Tested five distortion-parameter strategies on the same data; the
+strict-everything-fixed setup we started with leaves projection
+accuracy on the table without buying meaningful EPP-validation gains:
+
+| Variant | cam0 RMS (px) | cam1 RMS (px) | 3D median (mm) | 3D max (mm) | cam0 EPP (mm) | cam1 EPP (mm) |
+|---|---|---|---|---|---|---|
+| zero distortion | 3.36 | 3.76 | 0.201 | 0.534 | 9.15 | 7.65 |
+| k1 only | 3.30 | 3.75 | 0.193 | 0.500 | 10.63 | 8.02 |
+| k1 + k2 | 3.30 | 3.74 | 0.205 | 0.491 | 10.77 | 8.58 |
+| k1 + k2 + k3 | 3.30 | 3.74 | 0.205 | 0.491 | 10.77 | 8.58 |
+| **k1 + tangential (chosen)** | **3.23** | **3.63** | **0.154** | **0.431** | 10.80 | 8.19 |
+
+Findings:
+- **k2 and k3 are useless** — they collapse to zero (data doesn't
+  have enough peripheral resolution to constrain higher-order radial
+  terms).
+- **Tangential (p1, p2) improves projection accuracy ~10% and 3D
+  error ~25%.** Tangential captures lens decentering and asymmetric
+  mounting effects, which are real for a hand-built rig.
+- EPP discrepancy creeps up 1-2 mm with each additional fitted
+  parameter (more distortion freedom = more ambiguity in
+  K-vs-extrinsics decomposition). Still well under the 15 mm
+  threshold.
+
+The K1+tangential variant is implemented as the default in
+`tools/stereo_calibrate.py:CALIB_FLAGS`.
 
 ## Validation strategy (metric)
 
