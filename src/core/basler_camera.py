@@ -44,7 +44,7 @@ def _spawn_ffmpeg(output_path: Path, width: int, height: int, is_mono: bool,
         return None
     cmd = [
         imageio_ffmpeg.get_ffmpeg_exe(),
-        "-y", "-hide_banner", "-loglevel", "error",
+        "-y", "-hide_banner", "-loglevel", "warning",
         "-f", "rawvideo",
         "-pix_fmt", "gray" if is_mono else "bgr24",
         "-s", f"{width}x{height}",
@@ -53,14 +53,15 @@ def _spawn_ffmpeg(output_path: Path, width: int, height: int, is_mono: bool,
         "-c:v", "ffv1",
         "-level", str(FFV1_LEVEL),
         "-coder", "1",          # range coder (better compression than Golomb)
-        "-context", "1",        # larger context for better compression
         "-g", "1",              # every frame is a keyframe (intra-only)
         "-slices", str(FFV1_SLICES),
         "-slicecrc", "1",       # per-slice CRC for integrity verification
         str(output_path),
     ]
+    # stderr goes to the terminal so ffmpeg's actual error message is visible
+    # if it crashes (otherwise BrokenPipeError on stdin write hides the cause).
     try:
-        return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        return subprocess.Popen(cmd, stdin=subprocess.PIPE)
     except OSError as e:
         logger.error(f"Failed to spawn ffmpeg: {e}")
         return None
