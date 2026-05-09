@@ -1,8 +1,11 @@
 """QThread-based Basler camera interface using pypylon (PySide6).
 
-Recording writes H.264/MP4 via a piped ffmpeg subprocess (bundled by
-imageio-ffmpeg for cross-OS support). The grab loop writes raw frames
-into ffmpeg's stdin; ffmpeg encodes and finalizes the .mp4 container.
+Recording writes lossless FFV1/AVI via a piped ffmpeg subprocess
+(bundled by imageio-ffmpeg for cross-OS support). The grab loop writes
+raw frames into ffmpeg's stdin; ffmpeg encodes intra-only (one keyframe
+per frame) into the .avi container. FFV1 is lossless so optical-flow
+analysis downstream sees no codec artifacts; trade-off is larger files
+(~30-50 MB/s mono at 30 fps), which the SSD can absorb.
 """
 
 import subprocess
@@ -29,13 +32,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-H264_PRESET = "fast"
-H264_CRF = 18
+FFV1_LEVEL = 3      # modern format with slice support (fast parallel decode)
+FFV1_SLICES = 16    # split each frame into N slices for parallel encode/decode
 
 
 def _spawn_ffmpeg(output_path: Path, width: int, height: int, is_mono: bool,
                   fps: float) -> Optional[subprocess.Popen]:
-    """Spawn ffmpeg reading raw frames from stdin, writing H.264/MP4."""
+    """Spawn ffmpeg reading raw frames from stdin, writing FFV1/AVI."""
     if not IMAGEIO_FFMPEG_AVAILABLE:
         logger.error("imageio-ffmpeg not installed — cannot record")
         return None
@@ -47,10 +50,13 @@ def _spawn_ffmpeg(output_path: Path, width: int, height: int, is_mono: bool,
         "-s", f"{width}x{height}",
         "-r", f"{fps:g}",
         "-i", "-",
-        "-c:v", "libx264",
-        "-preset", H264_PRESET,
-        "-crf", str(H264_CRF),
-        "-pix_fmt", "yuv420p",
+        "-c:v", "ffv1",
+        "-level", str(FFV1_LEVEL),
+        "-coder", "1",          # range coder (better compression than Golomb)
+        "-context", "1",        # larger context for better compression
+        "-g", "1",              # every frame is a keyframe (intra-only)
+        "-slices", str(FFV1_SLICES),
+        "-slicecrc", "1",       # per-slice CRC for integrity verification
         str(output_path),
     ]
     try:
@@ -144,7 +150,7 @@ class BaslerCamera(QThread):
 
     def start_recording(self, output_path: Path, duration_sec: float = 10.0,
                         fps: Optional[float] = None) -> None:
-        """Begin writing grabbed frames to an H.264/MP4 file.
+        """Begin writing grabbed frames to a lossless FFV1/AVI file.
 
         Recording happens inside the existing grab loop — no second
         camera connection needed. The ffmpeg subprocess is spawned on
@@ -155,8 +161,8 @@ class BaslerCamera(QThread):
         camera actually produces.
         """
         output_path = Path(output_path)
-        if output_path.suffix.lower() != ".mp4":
-            output_path = output_path.with_suffix(".mp4")
+        if output_path.suffix.lower() != ".avi":
+            output_path = output_path.with_suffix(".avi")
         record_fps = fps if fps is not None else self.target_fps
 
         with self._writer_lock:
@@ -170,7 +176,7 @@ class BaslerCamera(QThread):
             self._record_frame_count = 0
             # ffmpeg proc created lazily on first frame
         logger.info(f"Recording armed: {output_path} "
-                    f"({duration_sec}s @ {record_fps}fps, H.264 CRF {H264_CRF})")
+                    f"({duration_sec}s @ {record_fps}fps, FFV1 lossless AVI)")
 
     def stop_recording(self) -> None:
         """Stop an in-progress recording. Safe to call from any thread."""
