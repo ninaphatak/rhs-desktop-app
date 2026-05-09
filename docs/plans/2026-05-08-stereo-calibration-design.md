@@ -220,6 +220,39 @@ optical flow analysis on near-textureless leaflet surfaces. FFV1 is
 lossless intra-only — every frame is an I-frame, no temporal
 prediction.
 
+## Camera geometry (as-built, 2026-05-08)
+
+| | CAD | Calibration recovered | Validation discrepancy |
+|---|---|---|---|
+| cam0 ("0° camera") tilt from vertical | 0° (design) / measured 0° in CAD | 0.91° | within mounting tolerance |
+| cam1 ("30° offset" — label only) | **19.33° from vertical** (as-built per CAD) | **18.30°** | 1.03° (within tolerance) |
+| cam0 EPP from origin | (-1.84, 0, 216.74) mm | (0.86, -0.57, 225.47) mm | 9.15 mm |
+| cam1 EPP from origin | (-68.17, 0, 191.73) mm | (-64.93, -0.02, 198.65) mm | 7.65 mm |
+
+Note: the "30°" in "30° offset camera" is **a name only**. The actual
+as-built axis tilt is 19.33°, originally 30° in the design but
+compromised during physical mounting. The calibration's 18.3°
+recovery agrees with the as-built CAD value to within 1°, confirming
+both the calibration math and the as-built geometry are consistent.
+
+## First successful calibration (water, 2026-05-08)
+
+End-to-end run on `outputs/videos/calib_water_2026-05-08_21-26-59_*.avi`:
+
+- **3D triangulation error**: median 0.20 mm, max 0.53 mm over 38 markers
+  visible to both cameras (markers 3, 11, 19 occluded from cam1 by
+  cylinder geometry; cam0 sees all 41).
+- **Reprojection RMS**: cam0 = 3.36 px, cam1 = 3.76 px. Higher than
+  ideal (sub-px is the gold standard), reflects residual refraction
+  the effective-pinhole model can't fully capture. Acceptable because
+  the 3D accuracy is what the deliverable cares about.
+- **EPP cross-check**: both within 10 mm of CAD prediction (passes
+  the relaxed 15 mm tolerance for as-built mounting + refraction).
+
+Per-ring 3D error pattern: top inner ring (z=0) is the most accurate
+(0.118 mm median); lowest cylinder (z=-11.76) is the least (0.292 mm
+median). Error scales with depth as expected for stereo geometry.
+
 ## Validation strategy (metric)
 
 Two complementary checks, run automatically by `stereo_calibrate.py`:
