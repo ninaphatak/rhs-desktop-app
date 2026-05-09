@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import threading
 import time
@@ -49,16 +50,58 @@ def _configure(camera: "pylon.InstantCamera") -> None:
         pass
 
 
+def _capture_metadata(camera, out_path: Path, cam_idx: int) -> None:
+    """Write a sidecar metadata.json with device info + capture parameters."""
+    info = camera.GetDeviceInfo()
+    meta: dict = {
+        "camera_index": cam_idx,
+        "serial_number": info.GetSerialNumber(),
+        "model_name": info.GetModelName(),
+        "configured": {
+            "target_fps": TARGET_FPS,
+            "exposure_us": EXPOSURE_US,
+            "gain": GAIN,
+        },
+        "captured_at_iso": datetime.now().isoformat(timespec="seconds"),
+    }
+    for key, attr in [
+        ("width_px", "Width"),
+        ("height_px", "Height"),
+        ("pixel_format", "PixelFormat"),
+    ]:
+        try:
+            meta[key] = getattr(camera, attr).GetValue()
+        except Exception:
+            pass
+    # Hardware timestamp tick frequency (Hz). Basler ace 2 USB3 = 1e9 (ns ticks).
+    for attr in ("GevTimestampTickFrequency", "TimestampTickFrequency"):
+        try:
+            meta["hw_timestamp_tick_hz"] = getattr(camera, attr).GetValue()
+            break
+        except Exception:
+            pass
+    if "hw_timestamp_tick_hz" not in meta:
+        meta["hw_timestamp_tick_hz_assumed"] = 1_000_000_000  # ace 2 default
+
+    meta_path = out_path.with_suffix(out_path.suffix + ".metadata.json")
+    meta_path.write_text(json.dumps(meta, indent=2))
+    print(f"[cam{cam_idx}] metadata -> {meta_path}")
+
+
 def _record_one(device, out_path: Path, duration_sec: float, cam_idx: int) -> None:
     """Open one camera, grab for duration_sec, write FFV1/AVI to out_path.
 
-    Also writes a sidecar `<out_path>.timestamps.csv` with one row per frame:
-        frame_index, system_time_s, hw_timestamp_ticks
-    Used to characterize inter-camera timing offset post-hoc.
+    Sidecar files written next to the AVI:
+        <out_path>.timestamps.csv   one row per frame
+        <out_path>.metadata.json    device info + capture parameters
+    The timestamps let us characterize inter-camera timing offset post-hoc;
+    the metadata identifies which physical camera produced each stream
+    (serial, model) and how to interpret hw_timestamp_ticks.
     """
     camera = pylon.InstantCamera(device)
     camera.Open()
     _configure(camera)
+    _capture_metadata(camera, out_path, cam_idx)
 
     proc = None
     frame_interval = 1.0 / TARGET_FPS
