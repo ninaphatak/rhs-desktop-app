@@ -33,11 +33,29 @@ RHS Monitor is a PySide6 desktop application for the Right Heart Simulator — a
 - 0° direct view (primary tracking camera) + 30° offset view
 - Both camera positions are fixed — valve appears at same pixel location every session
 
-### 3.5 Leaflet Boundary Tracking (CV Pipeline)
-- Sparse Lucas-Kanade optical flow on points along leaflet boundaries
-- Primary measurement: leaflet displacement
-- Secondary measurement: orifice area (polygon of tracked points)
-- See §6 for full design
+### 3.5 Leaflet Tracking (CV Pipeline)
+
+> **Pivot 2026-05-08:** The CV deliverable is now **metric (millimeter)
+> leaflet displacement** via stereo calibration + triangulation, not
+> pixel displacement. Dr. Lee made this a hard requirement after
+> meeting. See `docs/plans/2026-05-08-stereo-calibration-design.md`
+> for the active workstream.
+>
+> The dense-Farneback + point-annotator pixel-mode pipeline (§6, §7)
+> still exists as a **single-camera validation pipeline** for sanity
+> checks against optical-flow accuracy, but is no longer the headline
+> deliverable. The earlier sparse-LK and polygon-IoU framings in §5–§6
+> below are historical context for design rationale; the active CV
+> design is in the stereo-calibration plan doc.
+
+- Primary deliverable: per-frame metric XYZ leaflet displacement (mm)
+  from triangulated stereo annotations
+- Supporting validation: pixel-mode point annotator + cycle CV from
+  phase labels (single camera)
+- Calibration: per-fluid (water + 35% glycerin analog), single-view
+  DLT-style with effective-pinhole refraction model
+- See `docs/plans/2026-05-08-stereo-calibration-design.md` for the
+  current design
 
 ## 4. Hardware Specifications
 
@@ -45,8 +63,11 @@ RHS Monitor is a PySide6 desktop application for the Right Heart Simulator — a
 |-----------|------|
 | Arduino | 31250 baud, read-only, 7-field output |
 | Cameras | 2× Basler ace 2 a2A1920-160umBAS |
-| Resolution | 1920×1200 @ 60fps, monochrome |
-| Camera positions | 0° direct + 30° offset, FIXED positions |
+| Resolution | 1920×1200, monochrome (sensor capable of 60 fps; recorded at 30 fps) |
+| Camera positions | 0° direct + "30°" offset (label only — as-built optical axis tilt 19.33° from vertical, verified in CAD 2026-05-08). FIXED positions |
+| Camera lens | Edmund Optics #33-304, 16mm UC Series, C-mount, EPP=10.68 mm (from front vertex of first lens element, into lens). Same lens on both cameras. See `lens _specsheet.pdf` + `lens_drawing.pdf` |
+| Camera sync | Free-run (NOT hardware-triggered). Workaround for stereo: software timestamp matching via `grabResult.GetTimeStamp()`. Hardware sync via Basler GPIO pins is the eventual fix but deferred |
+| Recording format | Lossless FFV1 in AVI container (was H.264/MP4 — reverted 2026-05-08 to remove inter-frame compression artifacts that bias optical flow analysis) |
 | Valve | White silicone tricuspid, 3 leaflets, underwater |
 | Valve behavior | Leaflets bow outward (toward camera) when open |
 | Visual conditions | Bubbles on surface, uneven underwater lighting |
@@ -205,14 +226,30 @@ Synchronized time-series plot: mean leaflet boundary displacement overlaid with 
 2. Build `tools/leaflet_flow_test.py` — interactive sparse LK prototype on video
 3. Integrate into main app as `src/core/leaflet_tracker.py`
 
-## 8. Phase 2 — Stereo Tracking (Stretch Goal)
+## 8. Phase 2 — Stereo Tracking (NOW PRIMARY DELIVERABLE)
 
-Track boundary points in both 0° and 30° cameras. With stereo calibration, triangulate each point in 3D → metric leaflet displacement.
+> **Promoted from stretch goal to primary deliverable on 2026-05-08.**
+> See `docs/plans/2026-05-08-stereo-calibration-design.md` for the
+> full design.
 
-**Calibration challenge:** Standard stereo calibration assumes light travels in straight lines. Underwater, light refracts at the water-acrylic interface. Options:
-- In-situ calibration: submerge checkerboard, calibrate with refraction baked into the model
-- RIM (Refractive Index Matching): glycerol-water mixtures to match acrylic refractive index (adds complexity)
-- Calibrate intrinsics in air, extrinsics submerged
+Track a single anatomical leaflet landmark in both 0° and 30° cameras.
+With stereo calibration, triangulate per-frame → metric (mm) leaflet
+displacement.
+
+**Calibration approach:** single-view DLT-style on a fixed
+(non-moveable) 3D-printed calibration object that occupies the valve
+displacement volume. Underwater + acrylic refraction is absorbed into
+the fitted intrinsics ("effective pinhole," Approach A). Per-fluid
+calibration: separate JSON files for water and the 35% glycerin blood
+analog.
+
+**Sync workaround:** software timestamp matching (cameras are not
+hardware-triggered).
+
+**Pipeline:** `record_calibration.py` → `stereo_calibrate.py` →
+`annotate_stereo_point.py` → `triangulate.py` → `analyze_metric.py`.
+All offline tools in `tools/`; the app stays a read-only sensor
+monitor.
 
 ## 9. Regulatory Context
 
@@ -236,6 +273,9 @@ The RHS does not meet the FDA Section 201(h) medical device definition — it is
 | Standalone executable | PyInstaller/cx_Freeze — out of scope |
 | MapAnything integration | Deferred |
 | CI/CD pipeline | Deferred |
+| HDF5 dataset exporter (`tools/flow_export.py`) | Killed 2026-05-08 — downstream-researcher / CNN-on-flow-data path no longer prioritized; metric displacement is the deliverable directly |
+| Refractive ray tracing (Snell's law modeling) | Deferred — only revisit if effective-pinhole (Approach A) validation residuals are unacceptable |
+| Hardware camera trigger sync | Deferred — using software timestamp matching as workaround. Eventual right fix via Basler GPIO pins, not this iteration |
 
 ## 12. Build State
 
@@ -250,19 +290,25 @@ The RHS does not meet the FDA Section 201(h) medical device definition — it is
 | Plot dialog | ✅ Done | In-app visualization |
 | Mock data | ✅ Done | Arduino + camera mocks |
 | Setup scripts | ✅ Done | setup.sh/bat, run.sh/bat, hash-check for deps |
-| Dense flow exploration | ✅ Done | `tools/flow_explore.py` — threshold-based motion mask on recorded MP4 |
+| Dense flow exploration | ✅ Done | `tools/flow_explore.py` — direction-encoded color overlay (red=N, yellow=ENE, cyan=E), magnitude-encoded opacity, `--max-mag` and `--contrast` knobs, direction legend in bottom-left |
 | Annotation CSV I/O module | ✅ Done | `tools/_annotations.py` — `Annotation` dataclass + CSV read/write + malformed-phase rejection |
-| Shared Farneback params | ✅ Done | `tools/_flow_params.py` — hoisted from exporter for reuse by analyzer |
+| Shared Farneback params | ✅ Done | `tools/_flow_params.py` — hoisted for reuse by analyzer |
 | Point + phase annotator | ✅ Done | `tools/annotate_point.py` — manual landmark + per-frame phase label, OpenCV GUI. See `docs/plans/2026-05-04-point-annotator-design.md` and `2026-05-04-point-annotator-plan.md` |
-| Annotation playback | ✅ Done | `tools/playback_annotations.py` — animates labeled trajectory on source video with displacement vector + cumulative trail |
-| Cycle CV analyzer (Mode A) | ✅ Done | `tools/analyze_annotations.py` — cycle detection from phase labels, per-cycle period + peak displacement, CV across cycles |
-| Flow vs manual error (Mode B) | ✅ Done | `tools/analyze_annotations.py --video` — Farneback dense flow at annotated points, median + p95 error vs manual displacement |
-| HDF5 dataset exporter | ⬜ Deferred | `tools/flow_export.py` — design at `docs/plans/2026-04-20-flow-export-plan.md` |
-| Param sweep | ⬜ Deferred | Revisit after first annotated session — sweep target may change given new metrics |
-| Validation report | ⬜ Deferred | Figures + `docs/validation_results.md` after first sweep run |
+| Annotation playback | ✅ Done | `tools/playback_annotations.py` — overlay + arrow + trail; per-frame length readout in HUD; `--save` renders MP4; `--plot` saves displacement-vs-time figure to `outputs/`; auto-loops between first/last annotated frame |
+| Cycle CV analyzer (Mode A) | ✅ Done | `tools/analyze_annotations.py` — cycle detection from phase labels, per-cycle period + peak displacement, CV across cycles (pixel mode) |
+| Flow vs manual error (Mode B) | ✅ Done | `tools/analyze_annotations.py --video` — Farneback dense flow at annotated points, median + p95 error vs manual displacement (pixel mode) |
+| Lossless FFV1/AVI recording | ✅ Done | `src/core/basler_camera.py` + `src/ui/main_window.py` — reverted from H.264/MP4 to lossless intra-only FFV1 in AVI container; threading model + lock pattern preserved |
+| Standalone calibration capture | ✅ Done | `tools/record_calibration.py` — dual-camera capture without GUI; CLI: `python tools/record_calibration.py <fluid_label> [--duration N]`; outputs `calib_<label>_<ts>_camN.avi` |
+| Stereo calibration tool | ⬜ Planned | `tools/stereo_calibrate.py` — single-view DLT-style calibration per camera, manual dot-ID assignment, validation report. Awaiting marker spec from teammate. See `docs/plans/2026-05-08-stereo-calibration-design.md` |
+| Stereo annotator | ⬜ Planned | `tools/annotate_stereo_point.py` — dual-camera side-by-side single-landmark labeler, output stereo CSV `(frame_idx, u0, v0, u1, v1, phase)` |
+| Triangulation | ⬜ Planned | `tools/triangulate.py` — stereo CSV + calibration JSON → per-frame XYZ in mm + per-frame metric displacement |
+| Metric cycle analyzer | ⬜ Planned | `tools/analyze_metric.py` — same metrics as `analyze_annotations.py` but in mm |
+| Software sync correction | ⬜ Planned | Timestamp-matching preprocessor that aligns the two valve videos before stereo annotation |
 | Leaflet tracker (in-app) | ❌ Killed | CV work stays offline in `tools/`; `src/core/leaflet_tracker.py` removed from roadmap |
 | Polygon annotator | ❌ Killed | `tools/annotate_leaflets.py` superseded by `tools/annotate_point.py` |
-| Cycle-period FFT helpers | ❌ Killed | Cycle metrics now derived from phase labels in `tools/analyze_annotations.py`, not FFT |
-| Stereo calibration | ⬜ Not Started | Phase 2 stretch goal |
+| Cycle-period FFT helpers | ❌ Killed | Cycle metrics derived from phase labels in `tools/analyze_annotations.py`, not FFT |
+| HDF5 dataset exporter | ❌ Killed 2026-05-08 | `tools/flow_export.py` removed from roadmap. Downstream-researcher / CNN-on-flow-data path no longer prioritized in favor of direct metric displacement |
+| Param sweep | ❌ Killed 2026-05-08 | Was tied to dataset exporter; subsumed by stereo calibration + validation |
+| Validation report (pixel pipeline) | ❌ Killed 2026-05-08 | Subsumed by metric calibration's built-in validation report (reprojection + 3D triangulation error vs CAD) |
 
-**Validation framing (current, see `docs/plans/2026-05-04-point-annotator-design.md`):** the CV deliverable is a manually-labeled point trajectory with phase labels. The metrics are CV of cycle period, CV of per-cycle peak displacement, plus median + p95 error of dense optical flow at the manually-tracked landmark. NOT polygon IoU, NOT cycle-period FFT, NOT motion-mask-area as a valve-open-ness proxy. Earlier validation strategies in `2026-04-20-flow-export-design.md` and `2026-05-01-flow-export-amendment.md` are superseded on this point; the exporter design itself in those docs still applies.
+**Validation framing (current, see `docs/plans/2026-05-08-stereo-calibration-design.md`):** the CV deliverable is per-frame **metric (mm) leaflet displacement** computed by triangulating a manually-labeled landmark across both cameras using a stereo calibration fitted from a fixed 3D-printed calibration object. Stereo calibration is validated by (1) reprojection error per camera, (2) per-marker 3D triangulation error vs. known CAD positions, (3) cross-check against teammate-supplied scalar camera-to-marker distances. Pixel-mode point annotator + cycle CV (`docs/plans/2026-05-04-point-annotator-design.md`) is retained as a single-camera validation step but is no longer the primary deliverable. Earlier framings (polygon IoU, cycle-period FFT, motion-mask area, HDF5 dataset for downstream researcher) are all superseded.
