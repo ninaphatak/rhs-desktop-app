@@ -98,7 +98,8 @@ def _record_one(device, out_path: Path, duration_sec: float, cam_idx: int) -> No
     the metadata identifies which physical camera produced each stream
     (serial, model) and how to interpret hw_timestamp_ticks.
     """
-    camera = pylon.InstantCamera(device)
+    tl_factory = pylon.TlFactory.GetInstance()
+    camera = pylon.InstantCamera(tl_factory.CreateDevice(device))
     camera.Open()
     _configure(camera)
     _capture_metadata(camera, out_path, cam_idx)
