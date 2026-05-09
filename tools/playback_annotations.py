@@ -10,6 +10,13 @@ Usage:
     python tools/playback_annotations.py path/to/recording.mp4 \
         --annotations path/to/recording.mp4.annotations.csv \
         --speed 0.5
+
+    # Render the overlaid playback to an MP4 (non-interactive, no window):
+    python tools/playback_annotations.py path/to/recording.mp4 \
+        --save path/to/recording.playback.mp4
+
+    # Save a 2D plot of vector length (px) vs time (s) to outputs/:
+    python tools/playback_annotations.py path/to/recording.mp4 --plot
 """
 
 from __future__ import annotations
@@ -81,6 +88,15 @@ def draw_overlay(frame: np.ndarray, state: OverlayState) -> np.ndarray:
     return out
 
 
+def _vector_length_px(state: OverlayState) -> float | None:
+    """Euclidean distance from origin to the most recent labeled point."""
+    if state.origin is None or state.current is None:
+        return None
+    ox, oy = state.origin
+    cx, cy = state.current
+    return float(np.hypot(cx - ox, cy - oy))
+
+
 def _draw_hud(
     frame: np.ndarray,
     frame_idx: int,
@@ -97,6 +113,12 @@ def _draw_hud(
         frame, f"labeled_seen={n}",
         (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
     )
+    length = _vector_length_px(state)
+    if length is not None:
+        cv2.putText(
+            frame, f"length={length:.1f} px",
+            (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2,
+        )
     if state.last_phase:
         cv2.putText(
             frame, f"phase={state.last_phase}",
@@ -115,11 +137,101 @@ def _seek(cap: cv2.VideoCapture, frame_idx: int) -> np.ndarray | None:
     return frame if ret else None
 
 
+def _save_length_vs_time_plot(
+    by_frame: dict[int, Annotation],
+    fps: float,
+    video_path: Path,
+    out_dir: Path,
+) -> Path:
+    """Write a discrete time-vs-length plot for the labeled trajectory.
+
+    Time is `frame_idx / fps`, so samples land at the actual time the
+    annotated frames were captured. Length is the Euclidean distance from
+    the first labeled point (origin) to each subsequent labeled point.
+    """
+    import matplotlib
+    matplotlib.use("Agg")  # headless, no Qt
+    import matplotlib.pyplot as plt
+
+    if len(by_frame) < 2:
+        raise ValueError(
+            f"Need at least 2 annotations to plot length vs time; got {len(by_frame)}"
+        )
+
+    sorted_frames = sorted(by_frame.keys())
+    origin = (by_frame[sorted_frames[0]].point_x, by_frame[sorted_frames[0]].point_y)
+    times = [f / fps for f in sorted_frames]
+    lengths = [
+        float(np.hypot(by_frame[f].point_x - origin[0], by_frame[f].point_y - origin[1]))
+        for f in sorted_frames
+    ]
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{video_path.stem}_displacement.png"
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(times, lengths, "-", color="#888888", linewidth=0.8, alpha=0.7)
+    ax.plot(times, lengths, "o", color="#cc4444", markersize=3.5)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Vector length from origin (px)")
+    ax.set_title(f"Landmark displacement vs time — {video_path.name}")
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(left=times[0])
+    ax.set_ylim(bottom=0)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+    return out_path
+
+
+def _render_to_file(
+    cap: cv2.VideoCapture,
+    by_frame: dict[int, Annotation],
+    total_frames: int,
+    fps: float,
+    out_path: Path,
+) -> None:
+    """Walk frames 0..total_frames-1 in order and write the overlaid video."""
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height), isColor=True)
+    if not writer.isOpened():
+        print(f"Cannot open VideoWriter for {out_path}")
+        sys.exit(1)
+
+    state = OverlayState()
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    written = 0
+    for frame_idx in range(total_frames):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_idx in by_frame:
+            state.update(by_frame[frame_idx])
+        overlaid = draw_overlay(frame, state)
+        _draw_hud(overlaid, frame_idx, total_frames, state, paused=False)
+        writer.write(overlaid)
+        written += 1
+        if written % 60 == 0:
+            print(f"  rendered {written}/{total_frames}")
+    writer.release()
+    print(f"Wrote {out_path}  ({written} frames @ {fps:g} fps)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("video", type=Path)
     parser.add_argument("--annotations", type=Path, default=None)
     parser.add_argument("--speed", type=float, default=1.0)
+    parser.add_argument(
+        "--save", type=Path, default=None,
+        help="Render the overlaid playback to this MP4 path (no interactive window).",
+    )
+    parser.add_argument(
+        "--plot", action="store_true",
+        help="Save a 2D plot of vector length (px) vs time (s) to outputs/.",
+    )
     args = parser.parse_args()
 
     if not args.video.exists():
@@ -138,10 +250,31 @@ def main() -> None:
     annotations = read_annotations(csv_path)
     by_frame: dict[int, Annotation] = {a.frame_idx: a for a in annotations}
     print(f"Loaded {len(annotations)} annotations from {csv_path}")
+
+    if args.plot:
+        outputs_dir = Path(__file__).resolve().parent.parent / "outputs"
+        plot_path = _save_length_vs_time_plot(by_frame, fps, args.video, outputs_dir)
+        print(f"Saved displacement plot to {plot_path}")
+
+    if args.save is not None:
+        _render_to_file(cap, by_frame, total_frames, fps, args.save)
+        cap.release()
+        return
+
     print("Controls: SPACE=play/pause  RIGHT=step  LEFT=back  r=restart  q=quit")
 
+    # Auto-loop bounds: replay between the first and last annotated frame so the
+    # moving vector is always on screen. Without annotations, fall back to the
+    # full video range.
+    if by_frame:
+        loop_start = min(by_frame.keys())
+        loop_end = max(by_frame.keys())
+    else:
+        loop_start = 0
+        loop_end = total_frames - 1
+
     state = OverlayState()
-    frame_idx = 0
+    frame_idx = loop_start
     paused = False
 
     def rebuild_state_up_to(target_idx: int) -> OverlayState:
@@ -173,7 +306,7 @@ def main() -> None:
         elif key == ord(" "):
             paused = not paused
         elif key == ord("r"):
-            frame_idx = 0
+            frame_idx = loop_start
             state = rebuild_state_up_to(frame_idx)
             new_frame = _seek(cap, frame_idx)
             if new_frame is not None:
@@ -191,10 +324,12 @@ def main() -> None:
             if new_frame is not None:
                 frame = new_frame
         elif not paused:
-            if frame_idx + 1 >= total_frames:
-                paused = True
-                continue
-            frame_idx += 1
+            if frame_idx >= loop_end:
+                # Wrap back to the first annotated frame and keep looping.
+                frame_idx = loop_start
+                state = rebuild_state_up_to(frame_idx)
+            else:
+                frame_idx += 1
             new_frame = _seek(cap, frame_idx)
             if new_frame is not None:
                 frame = new_frame
