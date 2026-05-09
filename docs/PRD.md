@@ -299,11 +299,13 @@ The RHS does not meet the FDA Section 201(h) medical device definition — it is
 | Flow vs manual error (Mode B) | ✅ Done | `tools/analyze_annotations.py --video` — Farneback dense flow at annotated points, median + p95 error vs manual displacement (pixel mode) |
 | Lossless FFV1/AVI recording | ✅ Done | `src/core/basler_camera.py` + `src/ui/main_window.py` — reverted from H.264/MP4 to lossless intra-only FFV1 in AVI container; threading model + lock pattern preserved |
 | Standalone calibration capture | ✅ Done | `tools/record_calibration.py` — dual-camera capture without GUI; CLI: `python tools/record_calibration.py <fluid_label> [--duration N]`; outputs `calib_<label>_<ts>_camN.avi` |
-| Stereo calibration tool | ⬜ Planned | `tools/stereo_calibrate.py` — single-view DLT-style calibration per camera, manual dot-ID assignment, validation report. Awaiting marker spec from teammate. See `docs/plans/2026-05-08-stereo-calibration-design.md` |
-| Stereo annotator | ⬜ Planned | `tools/annotate_stereo_point.py` — dual-camera side-by-side single-landmark labeler, output stereo CSV `(frame_idx, u0, v0, u1, v1, phase)` |
-| Triangulation | ⬜ Planned | `tools/triangulate.py` — stereo CSV + calibration JSON → per-frame XYZ in mm + per-frame metric displacement |
-| Metric cycle analyzer | ⬜ Planned | `tools/analyze_metric.py` — same metrics as `analyze_annotations.py` but in mm |
-| Software sync correction | ⬜ Planned | Timestamp-matching preprocessor that aligns the two valve videos before stereo annotation |
+| Stereo calibration tool | ✅ Done | `tools/stereo_calibrate.py` — single-view calibration per camera with manual dot-ID assignment, interactive editor (`--edit`), load/save correspondences (`--load`) for resumability, k1+tangential distortion model with fixed focal length and principal point, full validation report (reprojection RMS + 3D triangulation error vs CAD + camera-position cross-check) |
+| First water calibration validated | ✅ Done | `outputs/calib/stereo_calib_water.json` — 0.154mm median 3D error, 0.431mm max, EPP discrepancies <11mm, cam1 tilt agrees with CAD to within 1° (18.30° vs 19.33°) |
+| Stereo annotator | ✅ Done | `tools/annotate_stereo_point.py` — dual-camera side-by-side single-landmark labeler with auto-fit display scale; output stereo CSV `(frame_idx, u0, v0, u1, v1, phase)`; auto-resumes from prior CSV |
+| Triangulation | ✅ Done | `tools/triangulate.py` — stereo CSV + calibration JSON → per-frame XYZ in mm + displacement vector from first labeled frame |
+| Metric cycle analyzer | ✅ Done | `tools/analyze_metric.py` — cycle period (ms), 3D path length (mm), peak 3D displacement (mm) + mean/std/CV across cycles |
+| Analog calibration | ⬜ Pending | Awaiting lab session with the 35% glycerin analog fluid; same `tools/stereo_calibrate.py` consumes it |
+| Software sync correction | ⬜ Pending | Timestamp-matching preprocessor that aligns the two valve videos before stereo annotation. Per-frame timestamps already logged by `record_calibration.py` (and presumably the GUI valve recordings); no consumer yet |
 | Leaflet tracker (in-app) | ❌ Killed | CV work stays offline in `tools/`; `src/core/leaflet_tracker.py` removed from roadmap |
 | Polygon annotator | ❌ Killed | `tools/annotate_leaflets.py` superseded by `tools/annotate_point.py` |
 | Cycle-period FFT helpers | ❌ Killed | Cycle metrics derived from phase labels in `tools/analyze_annotations.py`, not FFT |

@@ -24,9 +24,11 @@ pytest tests/ -v       # Run tests
 - `src/ui/` — PySide6 widgets: main_window, graph_panel, camera_panel, control_bar, plot_dialog, log_dialog
 - `src/utils/` — Config constants, port detection
 - `tests/` — pytest tests + mock hardware + `cv_frames/` (static valve frames for CV dev)
-- `tools/` — Standalone CV scripts (not part of the main app): record_calibration, flow_explore, annotate_point, playback_annotations, analyze_annotations + planned stereo tools
-- `docs/` — PRD.md, plans/, solenoid_protocol.md, lens_spec_sheet.pdf
-- `outputs/` — Recorded CSVs + run_log.csv (gitignored). Subdirs: `videos/` (FFV1/AVI camera recordings + calibration captures), `calib/` (per-fluid stereo calibration JSONs)
+- `tools/` — Standalone CV scripts (not part of the main app): record_calibration, flow_explore, annotate_point, playback_annotations, analyze_annotations, stereo_calibrate, annotate_stereo_point, triangulate, analyze_metric
+- `docs/` — PRD.md, plans/, solenoid_protocol.md
+- `markers.csv` — CAD-derived calibration object geometry (41 painted dots + cam0/cam1 reference positions); consumed by `tools/stereo_calibrate.py`
+- `lens _specsheet.pdf` + `lens_drawing.pdf` — Edmund Optics #33-304 16mm UC Series lens datasheet + mechanical drawing
+- `outputs/` — Recorded CSVs + run_log.csv (gitignored). Subdirs: `videos/` (FFV1/AVI camera recordings + calibration captures + per-frame timestamp + metadata sidecars), `calib/` (per-fluid stereo calibration JSONs + correspondence files)
 - `arduino/` — Arduino firmware (rhs_firmware.ino)
 - `legacy/` — Archived old code
 
@@ -115,16 +117,33 @@ but deferred.
 **Lens:** Edmund Optics #59-870, 16mm C-Series, C-mount. Same lens
 both cameras. EPP=24.42 mm per spec sheet.
 
-**Pipeline (offline, in `tools/`):**
-1. `record_calibration.py` (built) — captures dual-camera AVI of
-   submerged calibration object
-2. `stereo_calibrate.py` (planned) — single-view calibration per
-   camera, manual dot ID assignment, validation report
-3. `annotate_stereo_point.py` (planned) — dual-camera side-by-side
-   landmark labeler
-4. `triangulate.py` (planned) — stereo CSV + calibration → per-frame
-   XYZ in mm + metric displacement
-5. `analyze_metric.py` (planned) — cycle CVs in mm
+**Pipeline (offline, in `tools/`, all built 2026-05-08):**
+1. `record_calibration.py` — dual-camera AVI capture of submerged
+   calibration object + per-frame timestamp + device metadata sidecars
+2. `stereo_calibrate.py` — single-view calibration per camera with
+   manual dot ID assignment + interactive editor (--edit) + load/save
+   correspondences (--load) for resumability + validation report
+3. `annotate_stereo_point.py` — dual-camera side-by-side landmark
+   labeler (click same landmark in both panes per frame)
+4. `triangulate.py` — stereo annotations + calibration → per-frame
+   XYZ in mm + metric displacement vector
+5. `analyze_metric.py` — cycle CVs in mm (period, 3D path length,
+   peak displacement)
+
+**Calibration model details** (`tools/stereo_calibrate.py:CALIB_FLAGS`):
+- Initial K seeded from lens spec * fluid refractive index
+  (effective focal length underwater = 16mm * 1.333 = 21.3mm-equivalent)
+- Fixed focal length, fixed principal point at image center
+- Free distortion: k1 (radial) + p1, p2 (tangential); k2, k3 zeroed
+- This was the empirically-best variant of 5 tested on the first
+  water calibration run (sub-mm 3D accuracy with passing EPP cross-check)
+
+**First successful water calibration (2026-05-08):**
+- 3D triangulation median 0.154 mm, max 0.431 mm over 38 markers
+- Reprojection RMS: cam0 = 3.23 px, cam1 = 3.63 px
+- cam0 EPP discrepancy 10.80 mm, cam1 8.19 mm (within 15 mm tolerance)
+- Recovered cam1 tilt 18.30° vs CAD 19.33° (agreement within 1°)
+- Output: `outputs/calib/stereo_calib_water.json`
 
 **Pixel pipeline (kept as supporting validation):**
 The point-annotator + cycle-CV tools from
