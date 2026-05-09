@@ -79,7 +79,7 @@ cylinder additionally has dots on its top face.
 - Surface imperfections (eyeliner unevenness, 3D-print layer lines)
   expected; handled in detection via HSV threshold + morphological
   opening + size/circularity blob filters.
-- ~31 markers visible to the 30° camera (more visible to the 0°
+- ~31 markers visible to the 19.3° camera (more visible to the 0°
   camera). With minimal-distortion model = 12 unknowns per camera,
   62 measurements gives 5.2× constraint ratio — comfortable.
 

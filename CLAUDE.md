@@ -54,7 +54,7 @@ pytest tests/ -v       # Run tests
 - Cameras: 2× Basler ace 2 a2A1920-160umBAS, 1920×1200 monochrome. Sensor capable of 60 fps; **recording at 30 fps** (set in `src/core/basler_camera.py:target_fps`)
 - Camera lens: **Edmund Optics #33-304, 16mm UC Series, C-mount**. Same lens on both cameras. EPP = 10.68 mm from front vertex of first lens element, positive into lens (per `lens _specsheet.pdf` + `lens_drawing.pdf`). (Earlier reference to #59-870 C-Series was an incorrect lens link)
 - Camera sync: **NOT hardware-triggered** — both cameras free-run independently. For stereo analysis use **software timestamp matching** via `grabResult.GetTimeStamp()`. Hardware sync via Basler GPIO is the eventual fix but deferred
-- Camera positions: 0° direct view + "30° offset" (label only — the as-built optical axis tilt is **19.33° from vertical**, verified in CAD 2026-05-08; the 30° was design intent that got compromised during mounting). Both positions are fixed — valve appears at the same pixel location every session
+- Camera positions: 0° direct view + **19.3° offset** (the as-built optical axis tilt is 19.33° from vertical per CAD, recovered as 18.30° from calibration on 2026-05-08; originally designed for 30° but mounting compromised the angle). Both positions are fixed — valve appears at the same pixel location every session
 - Recording format: **lossless FFV1 in AVI container** (was H.264/MP4 — reverted 2026-05-08 to remove inter-frame compression artifacts that bias optical flow). ~30-50 MB/sec mono at 30 fps. Threading model + lock pattern preserved from MP4 implementation
 - Valve: white silicone tricuspid valve, 3 leaflets, operates underwater, leaflets bow outward toward camera when open
 - Working fluids (both in scope): water (n≈1.333) and 35% glycerin blood analog with 0.02% xanthan gum (n≈1.385). Separate stereo calibration per fluid
@@ -97,7 +97,7 @@ multiple z-depths (non-coplanar).
   has individually-positioned dots on its top face.
 - Dots: 1.5 mm diameter, painted with waterproof black eyeliner ink,
   CAD-extruded outlines (0.08 mm) as guides.
-- ~31 markers visible to the 30° camera; more visible to 0°.
+- ~31 markers visible to the 19.3° camera; more visible to 0°.
 - **Marker spec format from teammate: direct `(dx, dy, dz)` per
   marker** in CSV (`marker_id, dx_mm, dy_mm, dz_mm`). One row per
   painted dot on the entire object. No parametric ring description

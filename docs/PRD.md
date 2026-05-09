@@ -30,7 +30,7 @@ RHS Monitor is a PySide6 desktop application for the Right Heart Simulator — a
 
 ### 3.4 Dual Camera Feed
 - Two Basler ace 2 a2A1920-160umBAS cameras displayed simultaneously
-- 0° direct view (primary tracking camera) + 30° offset view
+- 0° direct view (primary tracking camera) + 19.3° offset view (was 30° design intent, but as-built tilt is 19.33° per CAD)
 - Both camera positions are fixed — valve appears at same pixel location every session
 
 ### 3.5 Leaflet Tracking (CV Pipeline)
@@ -64,7 +64,7 @@ RHS Monitor is a PySide6 desktop application for the Right Heart Simulator — a
 | Arduino | 31250 baud, read-only, 7-field output |
 | Cameras | 2× Basler ace 2 a2A1920-160umBAS |
 | Resolution | 1920×1200, monochrome (sensor capable of 60 fps; recorded at 30 fps) |
-| Camera positions | 0° direct + "30°" offset (label only — as-built optical axis tilt 19.33° from vertical, verified in CAD 2026-05-08). FIXED positions |
+| Camera positions | 0° direct + 19.3° offset (as-built tilt 19.33° per CAD, 18.30° per calibration 2026-05-08; originally 30° in design but mounting compromised the angle). FIXED positions |
 | Camera lens | Edmund Optics #33-304, 16mm UC Series, C-mount, EPP=10.68 mm (from front vertex of first lens element, into lens). Same lens on both cameras. See `lens _specsheet.pdf` + `lens_drawing.pdf` |
 | Camera sync | Free-run (NOT hardware-triggered). Workaround for stereo: software timestamp matching via `grabResult.GetTimeStamp()`. Hardware sync via Basler GPIO pins is the eventual fix but deferred |
 | Recording format | Lossless FFV1 in AVI container (was H.264/MP4 — reverted 2026-05-08 to remove inter-frame compression artifacts that bias optical flow analysis) |
@@ -112,7 +112,7 @@ Points placed along the leaflet boundary (where bright leaflet transitions to da
 
 ### 6.2 Camera Selection
 - **0° direct-view camera** is the primary tracking camera. Looks directly into the valve opening — bimodal intensity distribution (dark orifice vs bright leaflets), minimal foreshortening of the boundary.
-- **30° offset camera** can also track boundary points (boundary is still visible) but with more noise due to mid-tone shadows from the viewing angle.
+- **19.3° offset camera** can also track boundary points (boundary is still visible) but with more noise due to mid-tone shadows from the viewing angle.
 - **Stereo (stretch goal):** With both cameras calibrated, tracked boundary points can be triangulated in 3D for metric displacement. Requires underwater stereo calibration through water/acrylic interface (refraction invalidates standard calibration).
 
 ### 6.3 Fixed Camera/Valve Positions
@@ -219,7 +219,7 @@ Synchronized time-series plot: mean leaflet boundary displacement overlaid with 
 3. Is the valve housing truly zero-flow? (Confirms fixed position assumption)
 4. How large is frame-to-frame displacement at 60fps? (Validates LK parameter choices)
 5. Are the commissure tips trackable via flow? (The gray-gap problem may or may not affect LK)
-6. Is there visible flow difference between 0° and 30° camera views?
+6. Is there visible flow difference between 0° and 19.3° camera views?
 
 ### Next Steps (after exploration)
 1. Decide point initialization strategy
@@ -232,7 +232,7 @@ Synchronized time-series plot: mean leaflet boundary displacement overlaid with 
 > See `docs/plans/2026-05-08-stereo-calibration-design.md` for the
 > full design.
 
-Track a single anatomical leaflet landmark in both 0° and 30° cameras.
+Track a single anatomical leaflet landmark in both 0° and 19.3° cameras.
 With stereo calibration, triangulate per-frame → metric (mm) leaflet
 displacement.
 
