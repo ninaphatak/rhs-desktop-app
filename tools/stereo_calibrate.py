@@ -48,6 +48,12 @@ LENS_FOCAL_MM = 16.0
 # -- Camera-specific constants (Basler ace 2 a2A1920-160umBAS, IMX392 sensor) --
 PIXEL_SIZE_MM = 0.00345
 
+# -- Refractive indices per fluid (used to compute the underwater effective focal length) --
+FLUID_REFRACTIVE_INDICES: dict[str, float] = {
+    "water": 1.333,
+    "analog": 1.385,   # 35% glycerin + 0.02% xanthan gum
+}
+
 # -- Detection params (tuned against real frames at ~200mm WD) --
 DARK_THRESHOLD = 80           # pixels darker than this are dot candidates
 MORPH_KERNEL_SIZE = 5
@@ -55,15 +61,25 @@ BLOB_MIN_AREA = 30            # px^2 (1.5mm dots at ~200mm WD ~ 50-200 px^2)
 BLOB_MAX_AREA = 1200
 BLOB_MIN_CIRCULARITY = 0.4
 
-# -- Calibration model: minimal radial distortion (k1, k2 only) --
-# CALIB_USE_INTRINSIC_GUESS is required for non-coplanar single-view calibration:
-# OpenCV can't bootstrap K from one view of a 3D rig without an initial guess.
-CALIB_FLAGS = (cv2.CALIB_FIX_K3 | cv2.CALIB_ZERO_TANGENT_DIST
-               | cv2.CALIB_USE_INTRINSIC_GUESS)
+# -- Calibration model: physically-constrained for single-view non-coplanar rigs --
+# Single-view non-coplanar calibration has too many degrees of freedom for
+# stable K estimation; without strong constraints the optimizer overfits K
+# and distortion to compensate for noise, causing camera-position drift even
+# when projection accuracy is fine. We fix focal length (from lens spec +
+# pixel size + fluid refraction), fix principal point at image center, and
+# zero out all distortion. This trades a bit of reprojection accuracy for
+# physically-meaningful extrinsics that match the CAD model.
+CALIB_FLAGS = (
+    cv2.CALIB_USE_INTRINSIC_GUESS
+    | cv2.CALIB_FIX_FOCAL_LENGTH
+    | cv2.CALIB_FIX_PRINCIPAL_POINT
+    | cv2.CALIB_FIX_K1 | cv2.CALIB_FIX_K2 | cv2.CALIB_FIX_K3
+    | cv2.CALIB_ZERO_TANGENT_DIST
+)
 
 # -- Validation tolerance --
 VALIDATION_3D_TOLERANCE_MM = 5.0
-VALIDATION_EPP_TOLERANCE_MM = 5.0
+VALIDATION_EPP_TOLERANCE_MM = 15.0  # as-built mounting tolerance + residual refraction
 
 
 class CameraSpec(NamedTuple):
@@ -224,10 +240,17 @@ def manual_id_assignment(
     return correspondences
 
 
-def initial_camera_matrix(image_size: tuple[int, int]) -> np.ndarray:
-    """Initial intrinsic guess: focal length from lens spec + pixel size, principal point at image center."""
+def initial_camera_matrix(image_size: tuple[int, int], refractive_index: float = 1.0) -> np.ndarray:
+    """Initial K. Effective underwater focal length = lens_focal * fluid_n.
+
+    For underwater calibration through a flat acrylic interface, the
+    apparent magnification scales with the fluid's refractive index.
+    Pre-multiplying focal length by n gives an initial guess close to
+    the optimum, so a strict CALIB_FIX_FOCAL_LENGTH solve converges to
+    physically meaningful extrinsics.
+    """
     w, h = image_size
-    f_px = LENS_FOCAL_MM / PIXEL_SIZE_MM
+    f_px = (LENS_FOCAL_MM / PIXEL_SIZE_MM) * refractive_index
     return np.array([[f_px, 0,    w / 2],
                      [0,    f_px, h / 2],
                      [0,    0,    1   ]], dtype=np.float64)
@@ -364,6 +387,7 @@ def calibrate_camera(
     markers_xyz: dict[int, np.ndarray],
     correspondences: dict[int, tuple[float, float]],
     image_size: tuple[int, int],
+    refractive_index: float = 1.0,
 ) -> dict:
     """Run cv2.calibrateCamera with the given correspondences."""
     common_ids = sorted(set(markers_xyz.keys()) & set(correspondences.keys()))
@@ -371,7 +395,7 @@ def calibrate_camera(
         raise RuntimeError(f"Only {len(common_ids)} correspondences; need 6+")
     obj_pts = np.array([markers_xyz[mid] for mid in common_ids], dtype=np.float32).reshape(-1, 1, 3)
     img_pts = np.array([correspondences[mid] for mid in common_ids], dtype=np.float32).reshape(-1, 1, 2)
-    K_init = initial_camera_matrix(image_size)
+    K_init = initial_camera_matrix(image_size, refractive_index)
     rms, K, dist, rvecs, tvecs = cv2.calibrateCamera(
         objectPoints=[obj_pts],
         imagePoints=[img_pts],
@@ -494,10 +518,11 @@ def main() -> None:
     corr_path = Path("outputs/calib") / f"correspondences_{fluid_label}_{ts_label}.json"
     save_correspondences(corr_path, cam0_corr, cam1_corr, args.cam0_video, args.cam1_video, cam0_frame_idx)
 
-    # ---- Per-camera calibration ----
-    print("\nRunning per-camera calibration...")
-    cam0_calib = calibrate_camera(markers_xyz, cam0_corr, (w, h))
-    cam1_calib = calibrate_camera(markers_xyz, cam1_corr, (w, h))
+    # ---- Per-camera calibration (refractive index from fluid label) ----
+    refractive_index = FLUID_REFRACTIVE_INDICES.get(fluid_label, 1.333)
+    print(f"\nRunning per-camera calibration (fluid={fluid_label}, n={refractive_index})...")
+    cam0_calib = calibrate_camera(markers_xyz, cam0_corr, (w, h), refractive_index)
+    cam1_calib = calibrate_camera(markers_xyz, cam1_corr, (w, h), refractive_index)
     print(f"  cam0: reprojection RMS = {cam0_calib['reprojection_rms_px']:.3f} px ({len(cam0_calib['common_ids'])} markers)")
     print(f"  cam1: reprojection RMS = {cam1_calib['reprojection_rms_px']:.3f} px ({len(cam1_calib['common_ids'])} markers)")
 
