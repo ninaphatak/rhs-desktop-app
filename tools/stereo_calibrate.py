@@ -43,6 +43,10 @@ import numpy as np
 
 # -- Lens-specific constants (Edmund #33-304, 16mm UC Series) --
 LENS_EPP_FROM_FRONT_FACE_MM = 10.68
+LENS_FOCAL_MM = 16.0
+
+# -- Camera-specific constants (Basler ace 2 a2A1920-160umBAS, IMX392 sensor) --
+PIXEL_SIZE_MM = 0.00345
 
 # -- Detection params (tuned against real frames at ~200mm WD) --
 DARK_THRESHOLD = 80           # pixels darker than this are dot candidates
@@ -52,7 +56,10 @@ BLOB_MAX_AREA = 1200
 BLOB_MIN_CIRCULARITY = 0.4
 
 # -- Calibration model: minimal radial distortion (k1, k2 only) --
-CALIB_FLAGS = cv2.CALIB_FIX_K3 | cv2.CALIB_ZERO_TANGENT_DIST
+# CALIB_USE_INTRINSIC_GUESS is required for non-coplanar single-view calibration:
+# OpenCV can't bootstrap K from one view of a 3D rig without an initial guess.
+CALIB_FLAGS = (cv2.CALIB_FIX_K3 | cv2.CALIB_ZERO_TANGENT_DIST
+               | cv2.CALIB_USE_INTRINSIC_GUESS)
 
 # -- Validation tolerance --
 VALIDATION_3D_TOLERANCE_MM = 5.0
@@ -217,6 +224,142 @@ def manual_id_assignment(
     return correspondences
 
 
+def initial_camera_matrix(image_size: tuple[int, int]) -> np.ndarray:
+    """Initial intrinsic guess: focal length from lens spec + pixel size, principal point at image center."""
+    w, h = image_size
+    f_px = LENS_FOCAL_MM / PIXEL_SIZE_MM
+    return np.array([[f_px, 0,    w / 2],
+                     [0,    f_px, h / 2],
+                     [0,    0,    1   ]], dtype=np.float64)
+
+
+def load_correspondences(path: Path) -> tuple[dict[int, tuple[float, float]], dict[int, tuple[float, float]], int | None]:
+    """Load correspondences from a previously-saved JSON file."""
+    data = json.loads(path.read_text())
+    cam0 = {int(k): (float(v[0]), float(v[1])) for k, v in data["cam0"].items()}
+    cam1 = {int(k): (float(v[0]), float(v[1])) for k, v in data["cam1"].items()}
+    frame_idx = data.get("frame_index")
+    return cam0, cam1, frame_idx
+
+
+def save_correspondences(
+    path: Path,
+    cam0_corr: dict[int, tuple[float, float]],
+    cam1_corr: dict[int, tuple[float, float]],
+    cam0_video: Path,
+    cam1_video: Path,
+    frame_idx: int,
+) -> None:
+    """Save correspondences to JSON so a subsequent crash doesn't lose them."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "cam0_video": str(cam0_video),
+        "cam1_video": str(cam1_video),
+        "frame_index": frame_idx,
+        "cam0": {str(mid): [float(x), float(y)] for mid, (x, y) in cam0_corr.items()},
+        "cam1": {str(mid): [float(x), float(y)] for mid, (x, y) in cam1_corr.items()},
+    }
+    path.write_text(json.dumps(payload, indent=2))
+    print(f"Saved correspondences to {path}")
+
+
+def interactive_edit(
+    frame: np.ndarray,
+    correspondences: dict[int, tuple[float, float]],
+    cam_label: str,
+) -> dict[int, tuple[float, float]] | None:
+    """Open an interactive editor to add, modify, or delete marker assignments.
+
+    Click on empty space to add a marker (terminal prompts for marker_id).
+    Click near an existing marker to edit/delete it.
+    Press SPACE to commit changes. Press ESC to cancel.
+    Returns updated correspondences, or None if cancelled.
+    """
+    print(f"\n=== {cam_label}: editing correspondences ===")
+    print(f"  Loaded {len(correspondences)} markers; missing: {sorted(set(range(1, 42)) - set(correspondences.keys()))}")
+    print("  Click on an unmarked dot to add it. Click on an existing marker to edit/delete.")
+    print("  Press SPACE in the image window to commit, ESC to cancel.\n")
+
+    correspondences = dict(correspondences)
+    win = f"{cam_label} - edit (SPACE=done, ESC=cancel)"
+    last_click: list = [None]
+
+    def on_mouse(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            last_click[0] = (x, y)
+
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback(win, on_mouse)
+
+    while True:
+        annotated = _to_bgr(frame)
+        for mid, (x, y) in correspondences.items():
+            cv2.circle(annotated, (int(x), int(y)), 10, (255, 200, 0), 2)
+            cv2.putText(annotated, str(mid), (int(x) + 12, int(y) + 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
+        missing = sorted(set(range(1, 42)) - set(correspondences.keys()))
+        cv2.putText(annotated,
+                    f"{cam_label}  {len(correspondences)}/41 markers  missing: {missing}",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(annotated, "click=add/edit  SPACE=done  ESC=cancel",
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        cv2.imshow(win, annotated)
+        key = cv2.waitKey(50) & 0xFF
+
+        if key == 27:  # ESC
+            cv2.destroyWindow(win)
+            return None
+        if key == ord(" "):
+            cv2.destroyWindow(win)
+            return correspondences
+
+        if last_click[0] is not None:
+            cx, cy = last_click[0]
+            last_click[0] = None
+            # Find nearest existing marker
+            nearest_mid = None
+            nearest_dist = float("inf")
+            for mid, (mx, my) in correspondences.items():
+                d = ((cx - mx) ** 2 + (cy - my) ** 2) ** 0.5
+                if d < nearest_dist:
+                    nearest_dist = d
+                    nearest_mid = mid
+
+            if nearest_mid is not None and nearest_dist < 20:
+                user_input = input(f"  marker {nearest_mid} at ({correspondences[nearest_mid][0]:.0f}, {correspondences[nearest_mid][1]:.0f}) - new id (or 'd' to delete, ENTER to keep): ").strip().lower()
+                if user_input == "d":
+                    del correspondences[nearest_mid]
+                    print(f"    deleted marker {nearest_mid}")
+                elif user_input == "":
+                    pass
+                else:
+                    try:
+                        new_id = int(user_input)
+                        if 1 <= new_id <= 41:
+                            xy = correspondences.pop(nearest_mid)
+                            correspondences[new_id] = xy
+                            print(f"    relabeled {nearest_mid} -> {new_id}")
+                        else:
+                            print("    out of range; no change")
+                    except ValueError:
+                        print("    invalid; no change")
+            else:
+                user_input = input(f"  add marker at ({cx},{cy}) - id (1-41, or ENTER to skip): ").strip()
+                if not user_input:
+                    continue
+                try:
+                    new_id = int(user_input)
+                    if 1 <= new_id <= 41:
+                        if new_id in correspondences:
+                            print(f"    marker {new_id} already exists; overwriting")
+                        correspondences[new_id] = (float(cx), float(cy))
+                        print(f"    added marker {new_id} at ({cx},{cy})")
+                    else:
+                        print("    out of range; not added")
+                except ValueError:
+                    print("    invalid; not added")
+
+
 def calibrate_camera(
     markers_xyz: dict[int, np.ndarray],
     correspondences: dict[int, tuple[float, float]],
@@ -228,11 +371,12 @@ def calibrate_camera(
         raise RuntimeError(f"Only {len(common_ids)} correspondences; need 6+")
     obj_pts = np.array([markers_xyz[mid] for mid in common_ids], dtype=np.float32).reshape(-1, 1, 3)
     img_pts = np.array([correspondences[mid] for mid in common_ids], dtype=np.float32).reshape(-1, 1, 2)
+    K_init = initial_camera_matrix(image_size)
     rms, K, dist, rvecs, tvecs = cv2.calibrateCamera(
         objectPoints=[obj_pts],
         imagePoints=[img_pts],
         imageSize=image_size,
-        cameraMatrix=None,
+        cameraMatrix=K_init,
         distCoeffs=None,
         flags=CALIB_FLAGS,
     )
@@ -276,6 +420,10 @@ def main() -> None:
                     help="Frame index to use (default: middle)")
     ap.add_argument("--output", type=Path, default=None,
                     help="Output JSON path (default: outputs/calib/stereo_calib_<label>.json)")
+    ap.add_argument("--load", type=Path, default=None,
+                    help="Load correspondences from a previously-saved JSON instead of detecting+assigning")
+    ap.add_argument("--edit", action="store_true",
+                    help="Open the interactive editor (after loading or detecting) to add/modify markers")
     args = ap.parse_args()
 
     # ---- Load inputs ----
@@ -293,31 +441,58 @@ def main() -> None:
     print(f"  cam1 CAD EPP: ({cam1_spec.epp[0]:.2f}, {cam1_spec.epp[1]:.2f}, {cam1_spec.epp[2]:.2f})")
 
     # ---- Extract frames ----
-    cam0_frame, cam0_frame_idx = extract_frame(args.cam0_video, args.frame)
-    cam1_frame, cam1_frame_idx = extract_frame(args.cam1_video, args.frame)
+    # If loading, use the saved frame_index unless overridden
+    requested_frame = args.frame
+    if args.load is not None:
+        loaded_cam0, loaded_cam1, loaded_frame = load_correspondences(args.load)
+        if requested_frame < 0 and loaded_frame is not None:
+            requested_frame = loaded_frame
+            print(f"  Using saved frame_index={loaded_frame}")
+    cam0_frame, cam0_frame_idx = extract_frame(args.cam0_video, requested_frame)
+    cam1_frame, cam1_frame_idx = extract_frame(args.cam1_video, requested_frame)
     h, w = cam0_frame.shape[:2]
     print(f"  cam0 frame {cam0_frame_idx}: {w}x{h}")
     print(f"  cam1 frame {cam1_frame_idx}: {w}x{h}")
 
-    # ---- Detect blobs ----
-    cam0_blobs = detect_blobs(cam0_frame)
-    cam1_blobs = detect_blobs(cam1_frame)
-    print(f"  cam0: detected {len(cam0_blobs)} blobs")
-    print(f"  cam1: detected {len(cam1_blobs)} blobs")
-    if len(cam0_blobs) < 6 or len(cam1_blobs) < 6:
-        print("ERROR: too few blobs detected. Adjust DARK_THRESHOLD or BLOB_MIN_AREA in this script.")
-        sys.exit(1)
+    if args.load is not None:
+        # ---- Load correspondences from JSON ----
+        cam0_corr = loaded_cam0
+        cam1_corr = loaded_cam1
+        print(f"  Loaded cam0={len(cam0_corr)} markers, cam1={len(cam1_corr)} markers from {args.load}")
+    else:
+        # ---- Detect blobs + manually assign ----
+        cam0_blobs = detect_blobs(cam0_frame)
+        cam1_blobs = detect_blobs(cam1_frame)
+        print(f"  cam0: detected {len(cam0_blobs)} blobs")
+        print(f"  cam1: detected {len(cam1_blobs)} blobs")
+        if len(cam0_blobs) < 6 or len(cam1_blobs) < 6:
+            print("ERROR: too few blobs detected. Adjust DARK_THRESHOLD or BLOB_MIN_AREA in this script.")
+            sys.exit(1)
+        cam0_corr = manual_id_assignment(cam0_frame, cam0_blobs, "cam0")
+        if not cam0_corr:
+            print("Aborted by user"); sys.exit(1)
+        cam1_corr = manual_id_assignment(cam1_frame, cam1_blobs, "cam1")
+        if not cam1_corr:
+            print("Aborted by user"); sys.exit(1)
 
-    # ---- Manual ID assignment ----
-    cam0_corr = manual_id_assignment(cam0_frame, cam0_blobs, "cam0")
-    if not cam0_corr:
-        print("Aborted by user")
-        sys.exit(1)
-    cam1_corr = manual_id_assignment(cam1_frame, cam1_blobs, "cam1")
-    if not cam1_corr:
-        print("Aborted by user")
-        sys.exit(1)
-    print(f"\nAssigned: cam0={len(cam0_corr)} markers, cam1={len(cam1_corr)} markers")
+    # ---- Optional interactive editor (--edit) ----
+    if args.edit:
+        edited = interactive_edit(cam0_frame, cam0_corr, "cam0")
+        if edited is None:
+            print("cam0 edit cancelled; aborting"); sys.exit(1)
+        cam0_corr = edited
+        edited = interactive_edit(cam1_frame, cam1_corr, "cam1")
+        if edited is None:
+            print("cam1 edit cancelled; aborting"); sys.exit(1)
+        cam1_corr = edited
+
+    print(f"\nFinal: cam0={len(cam0_corr)} markers, cam1={len(cam1_corr)} markers")
+
+    # ---- Save correspondences NOW (before calibration) so a crash here is recoverable ----
+    fluid_label = args.cam0_video.stem.split("_")[1] if len(args.cam0_video.stem.split("_")) > 1 else "unknown"
+    ts_label = "_".join(args.cam0_video.stem.split("_")[2:-1]) or "0"
+    corr_path = Path("outputs/calib") / f"correspondences_{fluid_label}_{ts_label}.json"
+    save_correspondences(corr_path, cam0_corr, cam1_corr, args.cam0_video, args.cam1_video, cam0_frame_idx)
 
     # ---- Per-camera calibration ----
     print("\nRunning per-camera calibration...")
@@ -365,9 +540,7 @@ def main() -> None:
     print(f"    Calibrated: ({cam1_pos_calib[0]:.2f}, {cam1_pos_calib[1]:.2f}, {cam1_pos_calib[2]:.2f}) mm")
     print(f"    Discrepancy: {cam1_disc:.2f} mm   [{cam1_status}, threshold {VALIDATION_EPP_TOLERANCE_MM} mm]")
 
-    # ---- Save JSON ----
-    label_parts = args.cam0_video.stem.split("_")
-    fluid_label = label_parts[1] if len(label_parts) > 1 else "unknown"
+    # ---- Save calibration JSON (fluid_label already derived above) ----
     out_path = args.output or Path("outputs/calib") / f"stereo_calib_{fluid_label}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
