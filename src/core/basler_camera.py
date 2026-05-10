@@ -58,7 +58,8 @@ def _spawn_ffmpeg(output_path: Path, width: int, height: int, is_mono: bool,
         "-i", "-",
         "-c:v", "mjpeg",
         "-q:v", str(MJPG_QUALITY),
-        "-pix_fmt", "yuvj420p",  # mjpeg encoder requires YUV; ffmpeg auto-converts from gray
+        "-pix_fmt", "yuv420p",          # modern equivalent of deprecated yuvj420p
+        "-color_range", "jpeg",         # full 0-255 range (was implied by yuvj* prefix)
         str(output_path),
     ]
     # stderr goes to the terminal so ffmpeg's actual error message is visible
