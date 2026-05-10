@@ -1,33 +1,43 @@
-"""Dense optical flow explorer for valve camera footage.
+"""Dual-camera dense optical flow explorer in metric (mm) units.
 
-Side-by-side display:
-  - Left:  original frame tinted by flow direction and magnitude. Hue encodes
-           the flow vector's compass direction; opacity encodes magnitude.
-  - Right: pure binary motion mask (white where moving, black elsewhere).
+Side-by-side display of cam0 and cam1 with directional flow overlays.
+Each pane shows its frame tinted by flow direction (hue) and magnitude
+(opacity), with magnitude expressed in millimetres of in-plane motion
+per frame.
 
-Direction-to-color anchors (image-space compass; "north" = up on screen):
+Direction-to-color anchors (image-space compass; "north" = up on screen,
+applied independently per camera):
   - Red    -> flow heading north (up)
   - Yellow -> flow heading 30 deg counter-clockwise from east (ENE)
   - Cyan   -> flow heading east (right)
-  Other directions interpolate linearly between adjacent anchors around the
-  full circle (red wraps back to cyan the long way for the south-west arc).
+  Other directions interpolate linearly between adjacent anchors around
+  the full circle (red wraps back to cyan the long way for the
+  south-west arc).
 
 Opacity-to-magnitude:
-  - At |flow| <= --threshold px/frame the overlay is fully transparent.
-  - Above threshold opacity grows linearly to a cap at --max-mag px/frame.
+  - At |flow| <= --threshold mm/frame the overlay is fully transparent.
+  - Above threshold opacity grows linearly to a cap at --max-mag mm/frame.
   - At |flow| >= --max-mag the overlay reaches its peak alpha (0.85), so
     anatomy stays faintly visible even where motion is fastest.
 
-Threshold is the same control used by the dataset exporter
-(`tools/flow_export.py`); --max-mag only affects this visualization.
+Pixel-flow magnitudes are converted to mm using a per-pixel scale field
+derived once at startup from the stereo calibration. Each camera's
+pixel ray is back-projected onto the z=0 plane of the calibration-object
+frame (= the valve plane), and the local mm-per-pixel is the average
+distance moved on that plane when stepping +1 px in u or v.
+
+Pairing is naive frame-N matching across both videos. This is a
+visualization tool; precise temporal sync correction lives in
+tools/triangulate.py.
 
 Usage:
-    python tools/flow_explore.py path/to/valve_recording.mp4
-    python tools/flow_explore.py path/to/valve_recording.mp4 --threshold 2.0
-    python tools/flow_explore.py path/to/valve_recording.mp4 --max-mag 6.0
+    python tools/flow_explore.py VIDEO_CAM0 VIDEO_CAM1 --calib CALIB_JSON
+    python tools/flow_explore.py V0 V1 --calib outputs/calib/stereo_calib_water.json --threshold 1.5
+    python tools/flow_explore.py V0 V1 --calib C.json --max-mag 5.0
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -38,10 +48,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools._flow_params import FARNEBACK_PARAMS
 
 
-DEFAULT_THRESHOLD_PX = 3.0  # scaled for 30 fps recordings (design doc cited 1.5 at 60 fps)
-DEFAULT_MAX_MAG_PX = 10.0   # magnitude at which overlay opacity saturates
-DEFAULT_CONTRAST = 1.25     # gain applied around mid-gray (128) before Farneback
-PEAK_ALPHA = 0.85           # max blend weight on the colored overlay
+DEFAULT_THRESHOLD_MM = 1.0   # minimum 1 mm/frame motion to register on overlay
+DEFAULT_MAX_MAG_MM = 3.0     # mm/frame at which overlay opacity saturates
+DEFAULT_CONTRAST = 1.25      # gain applied around mid-gray (128) before Farneback
+PEAK_ALPHA = 0.85            # max blend weight on the colored overlay
 
 # BGR anchor colors (OpenCV channel order).
 COLOR_CYAN   = np.array([255, 255,   0], dtype=np.float32)  # east, theta = 0 deg
@@ -77,6 +87,82 @@ def _build_direction_lut() -> np.ndarray:
 DIRECTION_LUT = _build_direction_lut()
 
 
+def load_calibration(path: Path) -> dict:
+    """Load the JSON written by tools/stereo_calibrate.py.
+
+    Returns a dict with key 'image_size_wh' plus 'cam0' and 'cam1', each
+    holding K, dist, rvec, tvec as float64 numpy arrays.
+    """
+    d = json.loads(path.read_text())
+    out: dict = {"image_size_wh": tuple(d["image_size_wh"])}
+    for cam in ("cam0", "cam1"):
+        out[cam] = {
+            "K": np.array(d[cam]["K"], dtype=np.float64),
+            "dist": np.array(d[cam]["dist"], dtype=np.float64),
+            "rvec": np.array(d[cam]["rvec"], dtype=np.float64),
+            "tvec": np.array(d[cam]["tvec"], dtype=np.float64),
+        }
+    return out
+
+
+def compute_mm_per_px_field(
+    K: np.ndarray,
+    dist: np.ndarray,
+    rvec: np.ndarray,
+    tvec: np.ndarray,
+    image_size_wh: tuple[int, int],
+) -> np.ndarray:
+    """Per-pixel mm/px scale, evaluated on the z=0 plane of the object frame.
+
+    For each pixel (u, v) we back-project the undistorted ray into the
+    calibration-object coordinate frame, intersect it with the z=0 plane
+    (the valve plane), and take the average of the two displacements
+    incurred by stepping +1 px in u and +1 px in v on that plane.
+
+    Pixels whose rays do not hit the z=0 plane in front of the camera
+    (parallel rays or back-facing geometry) are assigned scale 0 so they
+    drop below threshold during overlay rendering.
+
+    Returns a (H, W) float32 array of mm-per-pixel values.
+    """
+    W, H = image_size_wh
+
+    # Sample at every integer pixel plus an extra row+col to take diffs.
+    us, vs = np.meshgrid(np.arange(W + 1), np.arange(H + 1))
+    grid = np.stack([us.ravel(), vs.ravel()], axis=-1).astype(np.float32)
+
+    # Undistort to normalized camera coords (z=1 plane in camera frame).
+    und = cv2.undistortPoints(grid.reshape(-1, 1, 2), K, dist).reshape(-1, 2)
+    d_cam = np.concatenate([und, np.ones((und.shape[0], 1), dtype=und.dtype)], axis=1)
+
+    # Pose stored as object -> camera: p_cam = R @ p_obj + t.
+    R, _ = cv2.Rodrigues(rvec)
+    Rt = R.T
+    C_obj = (-Rt @ tvec.reshape(3, 1)).ravel()       # camera origin in object frame
+    D_obj = (Rt @ d_cam.T).T                         # ray directions in object frame
+
+    # Intersect with z=0 plane: C_obj.z + lambda * D_obj.z = 0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lam = -C_obj[2] / D_obj[:, 2]
+    P_obj = C_obj.reshape(1, 3) + lam[:, None] * D_obj
+    valid = np.isfinite(lam) & (lam > 0)
+
+    P = P_obj.reshape(H + 1, W + 1, 3)
+    V = valid.reshape(H + 1, W + 1)
+
+    P_base = P[:H, :W]
+    P_u1 = P[:H, 1:W + 1]
+    P_v1 = P[1:H + 1, :W]
+
+    du = np.linalg.norm(P_u1 - P_base, axis=2)
+    dv = np.linalg.norm(P_v1 - P_base, axis=2)
+    scale = 0.5 * (du + dv)
+
+    valid_cell = V[:H, :W] & V[:H, 1:W + 1] & V[1:H + 1, :W]
+    scale = np.where(valid_cell, scale, 0.0)
+    return scale.astype(np.float32)
+
+
 def apply_contrast(gray: np.ndarray, factor: float) -> np.ndarray:
     """Linearly scale grayscale pixel values around 128 by `factor`.
 
@@ -89,38 +175,34 @@ def apply_contrast(gray: np.ndarray, factor: float) -> np.ndarray:
     return np.clip(out, 0.0, 255.0).astype(np.uint8)
 
 
-def compute_motion_mask(flow: np.ndarray, threshold_px: float) -> np.ndarray:
-    """Binary motion mask: 255 where |flow| >= threshold, 0 elsewhere."""
-    mag = np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2)
-    return ((mag >= threshold_px) * 255).astype(np.uint8)
-
-
 def render_directional_overlay(
     frame: np.ndarray,
     flow: np.ndarray,
-    threshold_px: float,
-    max_mag_px: float,
+    mm_per_px: np.ndarray,
+    threshold_mm: float,
+    max_mag_mm: float,
 ) -> np.ndarray:
-    """Tint `frame` by flow direction (hue) and magnitude (opacity).
+    """Tint `frame` by flow direction (hue) and metric magnitude (opacity).
 
-    Pixels with |flow| < threshold_px stay untinted. Pixels above threshold
-    receive a per-pixel BGR color (looked up from the direction LUT) blended
-    over the source frame with alpha proportional to magnitude, clipped at
-    max_mag_px and capped at PEAK_ALPHA.
+    `flow` is the raw per-frame pixel displacement field from Farneback;
+    `mm_per_px` is the precomputed scale field for this camera. Pixels
+    with |flow| (in mm/frame) below threshold stay untinted. Above
+    threshold, opacity grows linearly to PEAK_ALPHA at max_mag_mm.
     """
     fx = flow[..., 0]
     fy = flow[..., 1]
-    mag = np.sqrt(fx * fx + fy * fy)
+    mag_px = np.sqrt(fx * fx + fy * fy)
+    mag_mm = mag_px * mm_per_px
 
     # Image-space compass: y grows downward, so negate fy before atan2 so that
     # an upward flow vector (negative dy) gets theta = +90 deg = north.
     theta_deg = np.degrees(np.arctan2(-fy, fx)) % 360.0
     theta_idx = theta_deg.astype(np.int32) % 360
-    color = DIRECTION_LUT[theta_idx]  # (H, W, 3) float32, BGR
+    color = DIRECTION_LUT[theta_idx]
 
-    above = mag >= threshold_px
-    span = max(max_mag_px - threshold_px, 1e-6)
-    alpha = np.clip((mag - threshold_px) / span, 0.0, 1.0) * PEAK_ALPHA
+    above = mag_mm >= threshold_mm
+    span = max(max_mag_mm - threshold_mm, 1e-6)
+    alpha = np.clip((mag_mm - threshold_mm) / span, 0.0, 1.0) * PEAK_ALPHA
     alpha = np.where(above, alpha, 0.0).astype(np.float32)
     alpha3 = alpha[..., None]
 
@@ -130,18 +212,23 @@ def render_directional_overlay(
 
 def draw_overlay(
     img: np.ndarray,
+    label: str,
     frame_num: int,
     total_frames: int,
-    threshold_px: float,
-    max_mag_px: float,
+    threshold_mm: float,
+    max_mag_mm: float,
 ) -> None:
-    """Frame counter + thresholds in top-left corner."""
+    """Camera label, frame counter, and threshold readout in top-left."""
     cv2.putText(
-        img, f"Frame {frame_num}/{total_frames}", (10, 30),
+        img, label, (10, 30),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2,
+    )
+    cv2.putText(
+        img, f"Frame {frame_num}/{total_frames}", (10, 60),
         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
     )
     cv2.putText(
-        img, f"thr={threshold_px:.2f}  max={max_mag_px:.2f} px/frame", (10, 60),
+        img, f"thr={threshold_mm:.2f}  max={max_mag_mm:.2f} mm/frame", (10, 90),
         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
     )
 
@@ -180,18 +267,36 @@ def draw_direction_legend(img: np.ndarray) -> None:
         cv2.arrowedLine(img, (cx, cy), tip, tuple(int(c) for c in color), 2, tipLength=0.3)
 
 
+def open_video(path: Path) -> cv2.VideoCapture:
+    if not path.exists():
+        print(f"File not found: {path}")
+        sys.exit(1)
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        print(f"Cannot open video: {path}")
+        sys.exit(1)
+    return cap
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("video", type=Path, help="Path to recorded valve video")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("video_cam0", type=Path, help="Path to cam0 recording")
+    parser.add_argument("video_cam1", type=Path, help="Path to cam1 recording")
     parser.add_argument(
-        "--threshold", type=float, default=DEFAULT_THRESHOLD_PX,
-        help=f"Motion magnitude threshold in px/frame (default {DEFAULT_THRESHOLD_PX})",
+        "--calib", type=Path, required=True,
+        help="Path to stereo calibration JSON from tools/stereo_calibrate.py",
     )
     parser.add_argument(
-        "--max-mag", type=float, default=DEFAULT_MAX_MAG_PX,
+        "--threshold", type=float, default=DEFAULT_THRESHOLD_MM,
+        help=f"Motion magnitude threshold in mm/frame (default {DEFAULT_THRESHOLD_MM})",
+    )
+    parser.add_argument(
+        "--max-mag", type=float, default=DEFAULT_MAX_MAG_MM,
         help=(
-            "Magnitude at which overlay opacity saturates, in px/frame "
-            f"(default {DEFAULT_MAX_MAG_PX})"
+            "Magnitude at which overlay opacity saturates, in mm/frame "
+            f"(default {DEFAULT_MAX_MAG_MM})"
         ),
     )
     parser.add_argument(
@@ -208,29 +313,67 @@ def main() -> None:
         print(f"--max-mag ({args.max_mag}) must exceed --threshold ({args.threshold})")
         sys.exit(1)
 
-    if not args.video.exists():
-        print(f"File not found: {args.video}")
+    if not args.calib.exists():
+        print(f"Calibration not found: {args.calib}")
         sys.exit(1)
 
-    cap = cv2.VideoCapture(str(args.video))
-    if not cap.isOpened():
-        print(f"Cannot open video: {args.video}")
+    print(f"Loading calibration from {args.calib}")
+    calib = load_calibration(args.calib)
+    image_size = calib["image_size_wh"]
+    print(f"  calibration image size: {image_size[0]}x{image_size[1]}")
+
+    cap0 = open_video(args.video_cam0)
+    cap1 = open_video(args.video_cam1)
+
+    w0 = int(cap0.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h0 = int(cap0.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    w1 = int(cap1.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h1 = int(cap1.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if (w0, h0) != image_size or (w1, h1) != image_size:
+        print(
+            f"Video frame size mismatch: cam0={w0}x{h0}, cam1={w1}x{h1}, "
+            f"calibration={image_size[0]}x{image_size[1]}"
+        )
         sys.exit(1)
 
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    print("Computing per-pixel mm/px scale fields (one-time)...")
+    scale0 = compute_mm_per_px_field(
+        calib["cam0"]["K"], calib["cam0"]["dist"],
+        calib["cam0"]["rvec"], calib["cam0"]["tvec"], image_size,
+    )
+    scale1 = compute_mm_per_px_field(
+        calib["cam1"]["K"], calib["cam1"]["dist"],
+        calib["cam1"]["rvec"], calib["cam1"]["tvec"], image_size,
+    )
+    print(
+        f"  cam0 mm/px: median={np.median(scale0[scale0 > 0]):.5f}  "
+        f"min={scale0[scale0 > 0].min():.5f}  max={scale0.max():.5f}"
+    )
+    print(
+        f"  cam1 mm/px: median={np.median(scale1[scale1 > 0]):.5f}  "
+        f"min={scale1[scale1 > 0].min():.5f}  max={scale1.max():.5f}"
+    )
 
-    ret, prev_frame = cap.read()
-    if not ret:
-        print("Cannot read first frame")
+    total_frames = min(
+        int(cap0.get(cv2.CAP_PROP_FRAME_COUNT)),
+        int(cap1.get(cv2.CAP_PROP_FRAME_COUNT)),
+    )
+
+    ret0, prev0 = cap0.read()
+    ret1, prev1 = cap1.read()
+    if not (ret0 and ret1):
+        print("Cannot read first frames from one or both videos")
         sys.exit(1)
 
-    prev_gray = apply_contrast(cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY), args.contrast)
+    prev_gray0 = apply_contrast(cv2.cvtColor(prev0, cv2.COLOR_BGR2GRAY), args.contrast)
+    prev_gray1 = apply_contrast(cv2.cvtColor(prev1, cv2.COLOR_BGR2GRAY), args.contrast)
+
     frame_num = 1
     paused = False
 
     print(
         f"Controls: SPACE=play/pause  RIGHT=step  q=quit  "
-        f"(threshold={args.threshold} max={args.max_mag} px/frame  "
+        f"(threshold={args.threshold} max={args.max_mag} mm/frame  "
         f"contrast={args.contrast})"
     )
 
@@ -249,34 +392,44 @@ def main() -> None:
                 advance = True
 
         if advance:
-            ret, curr_frame = cap.read()
-            if not ret:
+            ret0, curr0 = cap0.read()
+            ret1, curr1 = cap1.read()
+            if not (ret0 and ret1):
                 print(f"End of video at frame {frame_num}")
                 paused = True
                 continue
 
-            curr_gray = apply_contrast(
-                cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY), args.contrast,
+            curr_gray0 = apply_contrast(
+                cv2.cvtColor(curr0, cv2.COLOR_BGR2GRAY), args.contrast,
+            )
+            curr_gray1 = apply_contrast(
+                cv2.cvtColor(curr1, cv2.COLOR_BGR2GRAY), args.contrast,
             )
 
-            flow = cv2.calcOpticalFlowFarneback(
-                prev_gray, curr_gray, None, **FARNEBACK_PARAMS,
+            flow0 = cv2.calcOpticalFlowFarneback(
+                prev_gray0, curr_gray0, None, **FARNEBACK_PARAMS,
+            )
+            flow1 = cv2.calcOpticalFlowFarneback(
+                prev_gray1, curr_gray1, None, **FARNEBACK_PARAMS,
             )
 
-            mask = compute_motion_mask(flow, args.threshold)
-            overlay = render_directional_overlay(
-                curr_frame, flow, args.threshold, args.max_mag,
+            overlay0 = render_directional_overlay(
+                curr0, flow0, scale0, args.threshold, args.max_mag,
             )
-            mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+            overlay1 = render_directional_overlay(
+                curr1, flow1, scale1, args.threshold, args.max_mag,
+            )
 
-            draw_overlay(overlay, frame_num, total_frames, args.threshold, args.max_mag)
-            draw_overlay(mask_bgr, frame_num, total_frames, args.threshold, args.max_mag)
-            draw_direction_legend(overlay)
+            draw_overlay(overlay0, "cam0", frame_num, total_frames, args.threshold, args.max_mag)
+            draw_overlay(overlay1, "cam1", frame_num, total_frames, args.threshold, args.max_mag)
+            draw_direction_legend(overlay0)
+            draw_direction_legend(overlay1)
 
-            combined = np.hstack([overlay, mask_bgr])
-            cv2.imshow("Dense Optical Flow Explorer", combined)
+            combined = np.hstack([overlay0, overlay1])
+            cv2.imshow("Dense Optical Flow Explorer (metric)", combined)
 
-            prev_gray = curr_gray
+            prev_gray0 = curr_gray0
+            prev_gray1 = curr_gray1
             frame_num += 1
 
         if not paused:
@@ -286,7 +439,8 @@ def main() -> None:
             elif key == ord(' '):
                 paused = True
 
-    cap.release()
+    cap0.release()
+    cap1.release()
     cv2.destroyAllWindows()
 
 
