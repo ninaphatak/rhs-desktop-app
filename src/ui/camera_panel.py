@@ -109,13 +109,18 @@ class CameraPanel(QWidget):
         cropped = scaled.copy(x, y, label_w, label_h)
         label.setPixmap(cropped)
 
-    def start_recording(self, camera_index: int, output_path: Path,
-                        duration_sec: float = 10.0, fps: float = 60.0) -> None:
-        """Start H.264/MP4 recording on the specified camera.
+    @property
+    def both_cameras_connected(self) -> bool:
+        """True iff both Basler cameras are connected and ready to record."""
+        return (self._left_camera is not None and self._left_camera.is_connected
+                and self._right_camera is not None and self._right_camera.is_connected)
 
-        If the requested FPS exceeds the camera's current target_fps,
-        the camera frame rate is bumped to match so the MP4 isn't
-        under-sampled.
+    def start_recording_single(self, camera_index: int, output_path: Path,
+                               duration_sec: float = 10.0, fps: float = 60.0) -> None:
+        """Start MJPG/AVI recording on a single camera (used by CLI auto-start path).
+
+        If the requested FPS exceeds the camera's current target_fps, the
+        camera frame rate is bumped to match so the AVI isn't under-sampled.
         """
         cam = self._left_camera if camera_index == 0 else self._right_camera
         if cam is None:
@@ -126,6 +131,21 @@ class CameraPanel(QWidget):
             cam._configure()
             logger.info(f"Camera {camera_index} FPS raised to {fps} for recording")
         cam.start_recording(output_path, duration_sec, fps)
+
+    def start_recording_both(self, cam0_path: Path, cam1_path: Path,
+                             duration_sec: float = 600.0) -> None:
+        """Start synchronized MJPG/AVI recording on both cameras (UI Record button)."""
+        if self._left_camera:
+            self._left_camera.start_recording(cam0_path, duration_sec=duration_sec)
+        if self._right_camera:
+            self._right_camera.start_recording(cam1_path, duration_sec=duration_sec)
+
+    def stop_recording(self) -> None:
+        """Stop recording on both cameras (UI Stop button)."""
+        if self._left_camera:
+            self._left_camera.stop_recording()
+        if self._right_camera:
+            self._right_camera.stop_recording()
 
     def stop_cameras(self) -> None:
         """Stop all camera threads."""

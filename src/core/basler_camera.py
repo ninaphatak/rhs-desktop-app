@@ -355,12 +355,22 @@ class BaslerCamera(QThread):
                         grab.Release()
                         self._frame_count += 1
                         self._write_frame(frame, sys_time=ts, hw_timestamp=hw_ts)
-                        self.frame_ready.emit({
-                            "timestamp": ts,
-                            "frame": frame,
-                            "frame_number": self._frame_count,
-                            "hw_timestamp_ticks": hw_ts,
-                        })
+                        # Throttle live preview during recording. 30 fps display
+                        # x 2 cameras saturates the GIL on small Macs (user
+                        # report: ~84% CPU on M2 8GB before throttle); the
+                        # recording path needs that headroom or grabs back up.
+                        # 5 fps preview (every 6th frame) is plenty for "is it
+                        # framed right" during a session. Recording itself
+                        # captures all 30 fps regardless — only the cross-thread
+                        # frame_ready emit is throttled.
+                        display_every = 6 if self._record_path is not None else 1
+                        if self._frame_count % display_every == 0:
+                            self.frame_ready.emit({
+                                "timestamp": ts,
+                                "frame": frame,
+                                "frame_number": self._frame_count,
+                                "hw_timestamp_ticks": hw_ts,
+                            })
                         elapsed = time.time() - frame_start
                         sleep_time = frame_interval - elapsed
                         if sleep_time > 0:
