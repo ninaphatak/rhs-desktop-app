@@ -13,12 +13,14 @@ to ~16ms bounded (still bounded by the cameras being free-running, not
 hardware-triggered — that's the eventual fix).
 """
 
+import json
 import subprocess
 import threading
 import time
 import logging
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO
 
 from PySide6.QtCore import QThread, Signal
 
@@ -95,6 +97,9 @@ class BaslerCamera(QThread):
         self._record_fps: float = 30.0
         self._record_max_frames: int = 0
         self._record_frame_count: int = 0
+        # Per-frame timestamp sidecar — paired with the AVI for sync analysis
+        # and the temporal-interpolation feature in tools/triangulate.py
+        self._ts_file: Optional[TextIO] = None
 
     @staticmethod
     def list_cameras() -> list[str]:
@@ -176,9 +181,48 @@ class BaslerCamera(QThread):
             self._record_fps = record_fps
             self._record_max_frames = int(duration_sec * record_fps)
             self._record_frame_count = 0
+            # Open per-frame timestamp sidecar (consumed by tools/triangulate.py
+            # for free-run sync correction via temporal interpolation).
+            ts_path = output_path.with_suffix(output_path.suffix + ".timestamps.csv")
+            try:
+                self._ts_file = open(ts_path, "w", newline="")
+                self._ts_file.write("frame_index,system_time_s,hw_timestamp_ticks\n")
+            except OSError as e:
+                logger.warning(f"Could not open timestamp sidecar {ts_path}: {e}")
+                self._ts_file = None
             # ffmpeg proc created lazily on first frame
+        # Write metadata sidecar (camera serial, configured params, etc.)
+        self._write_metadata_sidecar(output_path)
         logger.info(f"Recording armed: {output_path} "
                     f"({duration_sec}s @ {record_fps}fps, MJPG/AVI q={MJPG_QUALITY})")
+
+    def _write_metadata_sidecar(self, output_path: Path) -> None:
+        """Companion to start_recording: dumps device + capture config to JSON."""
+        if not self._camera or not self._camera.IsOpen():
+            return
+        try:
+            info = self._camera.GetDeviceInfo()
+            meta: dict = {
+                "serial_number": info.GetSerialNumber(),
+                "model_name": info.GetModelName(),
+                "configured": {
+                    "target_fps": self.target_fps,
+                    "exposure_us": self.exposure_us,
+                    "record_fps": self._record_fps,
+                },
+                "recording_started_iso": datetime.now().isoformat(timespec="seconds"),
+                "hw_timestamp_tick_hz_assumed": 1_000_000_000,  # ace 2 USB3
+            }
+            for key, attr in (("width_px", "Width"), ("height_px", "Height"),
+                              ("pixel_format", "PixelFormat")):
+                try:
+                    meta[key] = getattr(self._camera, attr).GetValue()
+                except Exception:
+                    pass
+            meta_path = output_path.with_suffix(output_path.suffix + ".metadata.json")
+            meta_path.write_text(json.dumps(meta, indent=2))
+        except Exception as e:
+            logger.warning(f"Could not write metadata sidecar: {e}")
 
     def stop_recording(self) -> None:
         """Stop an in-progress recording. Safe to call from any thread."""
@@ -188,10 +232,18 @@ class BaslerCamera(QThread):
             proc = self._ffmpeg_proc
             path = self._record_path
             count = self._record_frame_count
+            ts_file = self._ts_file
             self._ffmpeg_proc = None
             self._record_path = None
             self._record_frame_count = 0
             self._record_max_frames = 0
+            self._ts_file = None
+
+        if ts_file is not None:
+            try:
+                ts_file.close()
+            except Exception:
+                pass
 
         if proc is None:
             return
@@ -213,8 +265,14 @@ class BaslerCamera(QThread):
             logger.info(f"Recording saved: {path} ({count} frames)")
             self.recording_finished.emit(str(path))
 
-    def _write_frame(self, frame) -> None:
-        """Write a single frame if recording is active. Runs on grab thread."""
+    def _write_frame(self, frame, sys_time: float = 0.0,
+                     hw_timestamp: int = -1) -> None:
+        """Write a single frame if recording is active. Runs on grab thread.
+
+        sys_time is the Python-side time.time() at frame retrieval.
+        hw_timestamp is grab.GetTimeStamp() (Basler ace 2 USB3 = ns since
+        camera startup; 1 ns per tick). Both go to the timestamp sidecar.
+        """
         need_stop = False
         with self._writer_lock:
             if self._record_path is None:
@@ -237,6 +295,13 @@ class BaslerCamera(QThread):
             except (BrokenPipeError, OSError) as e:
                 logger.error(f"ffmpeg stdin write failed: {e}")
                 return
+            # Log per-frame timestamp (sidecar opened in start_recording)
+            if self._ts_file is not None:
+                try:
+                    self._ts_file.write(
+                        f"{self._record_frame_count},{sys_time:.6f},{hw_timestamp}\n")
+                except Exception:
+                    pass
             self._record_frame_count += 1
             if self._record_frame_count % 60 == 0:
                 logger.info(f"  Recorded {self._record_frame_count}/"
@@ -282,13 +347,19 @@ class BaslerCamera(QThread):
                     if grab and grab.GrabSucceeded():
                         ts = time.time()
                         frame = grab.Array.copy()
+                        # Pull hardware timestamp before releasing the grab
+                        try:
+                            hw_ts = int(grab.GetTimeStamp())
+                        except Exception:
+                            hw_ts = -1
                         grab.Release()
                         self._frame_count += 1
-                        self._write_frame(frame)
+                        self._write_frame(frame, sys_time=ts, hw_timestamp=hw_ts)
                         self.frame_ready.emit({
                             "timestamp": ts,
                             "frame": frame,
                             "frame_number": self._frame_count,
+                            "hw_timestamp_ticks": hw_ts,
                         })
                         elapsed = time.time() - frame_start
                         sleep_time = frame_interval - elapsed
