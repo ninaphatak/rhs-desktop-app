@@ -1,18 +1,22 @@
 """Dual-camera dense optical flow explorer in metric (mm) units.
 
 Side-by-side display of cam0 and cam1 with directional flow overlays.
-Each pane shows its frame tinted by flow direction (hue) and magnitude
-(opacity), with magnitude expressed in millimetres of in-plane motion
-per frame.
+Each pane shows its frame tinted by flow direction (object-frame axis
+color) and magnitude (opacity), with magnitude expressed in millimetres
+of in-plane motion per frame.
 
-Direction-to-color anchors (image-space compass; "north" = up on screen,
-applied independently per camera):
-  - Red    -> flow heading north (up)
-  - Yellow -> flow heading 30 deg counter-clockwise from east (ENE)
-  - Cyan   -> flow heading east (right)
+Direction-to-color anchors (calibration-object frame; same physical
+direction maps to the same color in BOTH cameras):
+  - Red     -> motion along +x of the calibration object frame
+  - Green   -> motion along +y
+  - Cyan    -> motion along -x
+  - Magenta -> motion along -y
   Other directions interpolate linearly between adjacent anchors around
-  the full circle (red wraps back to cyan the long way for the
-  south-west arc).
+  the full circle.
+
+Motion along +/- z is invisible by construction: pixel flow from a
+single camera is projected onto the z=0 plane of the object frame to
+recover metric units, which collapses any out-of-plane component.
 
 Opacity-to-magnitude:
   - At |flow| <= --threshold mm/frame the overlay is fully transparent.
@@ -20,11 +24,12 @@ Opacity-to-magnitude:
   - At |flow| >= --max-mag the overlay reaches its peak alpha (0.85), so
     anatomy stays faintly visible even where motion is fastest.
 
-Pixel-flow magnitudes are converted to mm using a per-pixel scale field
-derived once at startup from the stereo calibration. Each camera's
-pixel ray is back-projected onto the z=0 plane of the calibration-object
-frame (= the valve plane), and the local mm-per-pixel is the average
-distance moved on that plane when stepping +1 px in u or v.
+Per-pixel object-frame Jacobian (precomputed once per camera at startup):
+each camera's pixel ray is back-projected onto the z=0 plane of the
+calibration-object frame. The 2x2 Jacobian at each pixel maps image-space
+flow (du, dv) directly to object-frame in-plane displacement (dx, dy)
+in mm. Per frame we apply the Jacobian, then read magnitude and angle
+in the object frame.
 
 Pairing is naive frame-N matching across both videos. This is a
 visualization tool; precise temporal sync correction lives in
@@ -53,34 +58,37 @@ DEFAULT_MAX_MAG_MM = 3.0     # mm/frame at which overlay opacity saturates
 DEFAULT_CONTRAST = 1.25      # gain applied around mid-gray (128) before Farneback
 PEAK_ALPHA = 0.85            # max blend weight on the colored overlay
 
-# BGR anchor colors (OpenCV channel order).
-COLOR_CYAN   = np.array([255, 255,   0], dtype=np.float32)  # east, theta = 0 deg
-COLOR_YELLOW = np.array([  0, 255, 255], dtype=np.float32)  # 30 deg CCW of east
-COLOR_RED    = np.array([  0,   0, 255], dtype=np.float32)  # north, theta = 90 deg
+# BGR anchor colors (OpenCV channel order), tied to object-frame xy axes.
+COLOR_RED     = np.array([  0,   0, 255], dtype=np.float32)  # +x, theta =   0 deg
+COLOR_GREEN   = np.array([  0, 255,   0], dtype=np.float32)  # +y, theta =  90 deg
+COLOR_CYAN    = np.array([255, 255,   0], dtype=np.float32)  # -x, theta = 180 deg
+COLOR_MAGENTA = np.array([255,   0, 255], dtype=np.float32)  # -y, theta = 270 deg
 
 
 def _build_direction_lut() -> np.ndarray:
-    """360-entry BGR LUT mapping flow angle (degrees) to anchor color.
+    """360-entry BGR LUT mapping object-frame xy angle to axis-color.
 
-    Anchors (math convention, 0 deg = +x = east, 90 deg = +y_inverted = north):
-        0   -> cyan
-        30  -> yellow
-        90  -> red
-        90..360 -> red interpolated back to cyan the long way around
+    Anchors: 0 deg -> +x (red), 90 deg -> +y (green), 180 deg -> -x (cyan),
+    270 deg -> -y (magenta), wrapping back to red at 360. Linear blend
+    between consecutive anchors.
 
     Returns float32 array of shape (360, 3).
     """
     lut = np.zeros((360, 3), dtype=np.float32)
-    for theta in range(360):
-        if theta < 30:
-            t = theta / 30.0
-            lut[theta] = (1 - t) * COLOR_CYAN + t * COLOR_YELLOW
-        elif theta < 90:
-            t = (theta - 30) / 60.0
-            lut[theta] = (1 - t) * COLOR_YELLOW + t * COLOR_RED
-        else:
-            t = (theta - 90) / 270.0
-            lut[theta] = (1 - t) * COLOR_RED + t * COLOR_CYAN
+    anchors = [
+        (0,   COLOR_RED),
+        (90,  COLOR_GREEN),
+        (180, COLOR_CYAN),
+        (270, COLOR_MAGENTA),
+        (360, COLOR_RED),
+    ]
+    for i in range(len(anchors) - 1):
+        a_deg, a_color = anchors[i]
+        b_deg, b_color = anchors[i + 1]
+        span = b_deg - a_deg
+        for theta in range(a_deg, b_deg):
+            t = (theta - a_deg) / span
+            lut[theta] = (1 - t) * a_color + t * b_color
     return lut
 
 
@@ -105,25 +113,27 @@ def load_calibration(path: Path) -> dict:
     return out
 
 
-def compute_mm_per_px_field(
+def compute_pixel_jacobian(
     K: np.ndarray,
     dist: np.ndarray,
     rvec: np.ndarray,
     tvec: np.ndarray,
     image_size_wh: tuple[int, int],
 ) -> np.ndarray:
-    """Per-pixel mm/px scale, evaluated on the z=0 plane of the object frame.
+    """Per-pixel Jacobian mapping image-flow (du, dv) to object-frame (dx, dy).
 
     For each pixel (u, v) we back-project the undistorted ray into the
-    calibration-object coordinate frame, intersect it with the z=0 plane
-    (the valve plane), and take the average of the two displacements
-    incurred by stepping +1 px in u and +1 px in v on that plane.
+    calibration-object coordinate frame, intersect with the z=0 plane (the
+    valve plane), and finite-difference the back-projection in u and v to
+    get the columns of the Jacobian. Applying this 2x2 matrix to a
+    pixel-flow vector yields the in-plane object-frame displacement in mm.
 
     Pixels whose rays do not hit the z=0 plane in front of the camera
-    (parallel rays or back-facing geometry) are assigned scale 0 so they
-    drop below threshold during overlay rendering.
+    (parallel rays or back-facing geometry) get a zero Jacobian so they
+    fall below the magnitude threshold during overlay rendering.
 
-    Returns a (H, W) float32 array of mm-per-pixel values.
+    Returns a (H, W, 2, 2) float32 array. J[v, u, :, 0] is the object-xy
+    displacement per +1 px in u; J[v, u, :, 1] is per +1 px in v.
     """
     W, H = image_size_wh
 
@@ -150,17 +160,50 @@ def compute_mm_per_px_field(
     P = P_obj.reshape(H + 1, W + 1, 3)
     V = valid.reshape(H + 1, W + 1)
 
-    P_base = P[:H, :W]
-    P_u1 = P[:H, 1:W + 1]
-    P_v1 = P[1:H + 1, :W]
+    P_base = P[:H, :W, :2]            # only xy components (z is 0 by construction)
+    P_u1   = P[:H, 1:W + 1, :2]
+    P_v1   = P[1:H + 1, :W, :2]
 
-    du = np.linalg.norm(P_u1 - P_base, axis=2)
-    dv = np.linalg.norm(P_v1 - P_base, axis=2)
-    scale = 0.5 * (du + dv)
+    e_u = P_u1 - P_base               # (H, W, 2): obj-xy displacement per +1 px in u
+    e_v = P_v1 - P_base               # (H, W, 2): obj-xy displacement per +1 px in v
+
+    # Stack into J such that J @ (du, dv) = du * e_u + dv * e_v  (in obj xy).
+    J = np.stack([e_u, e_v], axis=-1)  # (H, W, 2, 2)
 
     valid_cell = V[:H, :W] & V[:H, 1:W + 1] & V[1:H + 1, :W]
-    scale = np.where(valid_cell, scale, 0.0)
-    return scale.astype(np.float32)
+    J = np.where(valid_cell[..., None, None], J, 0.0)
+    return J.astype(np.float32)
+
+
+def project_axis_screen_directions(
+    K: np.ndarray,
+    dist: np.ndarray,
+    rvec: np.ndarray,
+    tvec: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Screen-space unit vectors for object-frame +x and +y at the origin.
+
+    Projects the object-frame origin and a 10 mm offset along +x and +y
+    onto the image plane via cv2.projectPoints, then normalises the
+    pixel-space difference vectors. Used to draw a per-camera axis legend
+    that points in the actual on-screen direction of each axis.
+    """
+    delta = 10.0  # mm; far enough to swamp pixel quantisation but still in-plane
+    points = np.array([
+        [0.0,  0.0,  0.0],
+        [delta, 0.0, 0.0],
+        [0.0,  delta, 0.0],
+    ], dtype=np.float64).reshape(-1, 1, 3)
+
+    img_pts, _ = cv2.projectPoints(points, rvec, tvec, K, dist)
+    img_pts = img_pts.reshape(-1, 2)
+
+    p0 = img_pts[0]
+    vx = img_pts[1] - p0
+    vy = img_pts[2] - p0
+    vx = vx / (np.linalg.norm(vx) + 1e-9)
+    vy = vy / (np.linalg.norm(vy) + 1e-9)
+    return vx, vy
 
 
 def apply_contrast(gray: np.ndarray, factor: float) -> np.ndarray:
@@ -178,25 +221,28 @@ def apply_contrast(gray: np.ndarray, factor: float) -> np.ndarray:
 def render_directional_overlay(
     frame: np.ndarray,
     flow: np.ndarray,
-    mm_per_px: np.ndarray,
+    jacobian: np.ndarray,
     threshold_mm: float,
     max_mag_mm: float,
 ) -> np.ndarray:
-    """Tint `frame` by flow direction (hue) and metric magnitude (opacity).
+    """Tint `frame` by object-frame flow direction and metric magnitude.
 
     `flow` is the raw per-frame pixel displacement field from Farneback;
-    `mm_per_px` is the precomputed scale field for this camera. Pixels
-    with |flow| (in mm/frame) below threshold stay untinted. Above
-    threshold, opacity grows linearly to PEAK_ALPHA at max_mag_mm.
+    `jacobian` is the precomputed (H, W, 2, 2) per-pixel map from image
+    flow to object-frame xy displacement. Pixels with |flow| (in mm/frame)
+    below threshold stay untinted. Above threshold, opacity grows linearly
+    to PEAK_ALPHA at max_mag_mm.
     """
-    fx = flow[..., 0]
-    fy = flow[..., 1]
-    mag_px = np.sqrt(fx * fx + fy * fy)
-    mag_mm = mag_px * mm_per_px
+    fu = flow[..., 0]
+    fv = flow[..., 1]
 
-    # Image-space compass: y grows downward, so negate fy before atan2 so that
-    # an upward flow vector (negative dy) gets theta = +90 deg = north.
-    theta_deg = np.degrees(np.arctan2(-fy, fx)) % 360.0
+    # Apply per-pixel Jacobian: (dx_obj, dy_obj) = J @ (du, dv).
+    dx_obj = jacobian[..., 0, 0] * fu + jacobian[..., 0, 1] * fv
+    dy_obj = jacobian[..., 1, 0] * fu + jacobian[..., 1, 1] * fv
+    mag_mm = np.sqrt(dx_obj * dx_obj + dy_obj * dy_obj)
+
+    # Object-frame angle: 0 deg = +x, 90 deg = +y, etc.
+    theta_deg = np.degrees(np.arctan2(dy_obj, dx_obj)) % 360.0
     theta_idx = theta_deg.astype(np.int32) % 360
     color = DIRECTION_LUT[theta_idx]
 
@@ -233,17 +279,23 @@ def draw_overlay(
     )
 
 
-def draw_direction_legend(img: np.ndarray) -> None:
-    """Draw the three anchor arrows in the bottom-left corner of `img`.
+def draw_axis_legend(
+    img: np.ndarray,
+    axis_x_screen: np.ndarray,
+    axis_y_screen: np.ndarray,
+) -> None:
+    """Draw object-frame +x/+y/-x/-y arrows in the bottom-left corner.
 
-    Arrow geometry matches the direction-color mapping:
-      - Red    -> straight up    (north,  theta = 90 deg)
-      - Yellow -> up-and-right   (theta = 30 deg, 30 deg CCW of east)
-      - Cyan   -> straight right (east,   theta =  0 deg)
+    Arrow directions are the screen-space projections of the object-frame
+    axes for THIS camera, so the legend reflects how each axis appears
+    from the current viewpoint. Colors match the direction LUT:
+      - Red     -> +x
+      - Green   -> +y
+      - Cyan    -> -x
+      - Magenta -> -y
 
-    All three share an origin so the user can read the angles directly off
-    the legend. Drawn with a black outline so it stays legible against any
-    background.
+    All four share an origin and are drawn with a black outline so the
+    legend stays legible against any background.
     """
     h = img.shape[0]
     arrow_len = 45
@@ -252,17 +304,17 @@ def draw_direction_legend(img: np.ndarray) -> None:
     cx, cy = margin_x, h - margin_y
 
     anchors = [
-        (0.0,  COLOR_CYAN),    # east
-        (30.0, COLOR_YELLOW),  # 30 deg CCW of east
-        (90.0, COLOR_RED),     # north
+        ( axis_x_screen, COLOR_RED),
+        ( axis_y_screen, COLOR_GREEN),
+        (-axis_x_screen, COLOR_CYAN),
+        (-axis_y_screen, COLOR_MAGENTA),
     ]
-    for theta_deg, color in anchors:
-        theta = np.deg2rad(theta_deg)
+    for direction, color in anchors:
+        # direction is already in image pixel coords (y grows down), no negation.
         tip = (
-            int(round(cx + arrow_len * np.cos(theta))),
-            int(round(cy - arrow_len * np.sin(theta))),  # negate: image y grows down
+            int(round(cx + arrow_len * float(direction[0]))),
+            int(round(cy + arrow_len * float(direction[1]))),
         )
-        # Black outline first, then the colored arrow on top.
         cv2.arrowedLine(img, (cx, cy), tip, (0, 0, 0), 4, tipLength=0.3)
         cv2.arrowedLine(img, (cx, cy), tip, tuple(int(c) for c in color), 2, tipLength=0.3)
 
@@ -336,22 +388,33 @@ def main() -> None:
         )
         sys.exit(1)
 
-    print("Computing per-pixel mm/px scale fields (one-time)...")
-    scale0 = compute_mm_per_px_field(
+    print("Computing per-pixel object-frame Jacobians (one-time)...")
+    jac0 = compute_pixel_jacobian(
         calib["cam0"]["K"], calib["cam0"]["dist"],
         calib["cam0"]["rvec"], calib["cam0"]["tvec"], image_size,
     )
-    scale1 = compute_mm_per_px_field(
+    jac1 = compute_pixel_jacobian(
         calib["cam1"]["K"], calib["cam1"]["dist"],
         calib["cam1"]["rvec"], calib["cam1"]["tvec"], image_size,
     )
-    print(
-        f"  cam0 mm/px: median={np.median(scale0[scale0 > 0]):.5f}  "
-        f"min={scale0[scale0 > 0].min():.5f}  max={scale0.max():.5f}"
+    # Diagnostic mm/px scale: sqrt of |det(J)| approximates mm-per-px area scale.
+    for name, J in (("cam0", jac0), ("cam1", jac1)):
+        det = np.abs(J[..., 0, 0] * J[..., 1, 1] - J[..., 0, 1] * J[..., 1, 0])
+        scale = np.sqrt(det)
+        valid = scale > 0
+        if valid.any():
+            print(
+                f"  {name} mm/px (sqrt|det J|): median={np.median(scale[valid]):.5f}  "
+                f"min={scale[valid].min():.5f}  max={scale.max():.5f}"
+            )
+
+    axes_screen0 = project_axis_screen_directions(
+        calib["cam0"]["K"], calib["cam0"]["dist"],
+        calib["cam0"]["rvec"], calib["cam0"]["tvec"],
     )
-    print(
-        f"  cam1 mm/px: median={np.median(scale1[scale1 > 0]):.5f}  "
-        f"min={scale1[scale1 > 0].min():.5f}  max={scale1.max():.5f}"
+    axes_screen1 = project_axis_screen_directions(
+        calib["cam1"]["K"], calib["cam1"]["dist"],
+        calib["cam1"]["rvec"], calib["cam1"]["tvec"],
     )
 
     total_frames = min(
@@ -414,16 +477,16 @@ def main() -> None:
             )
 
             overlay0 = render_directional_overlay(
-                curr0, flow0, scale0, args.threshold, args.max_mag,
+                curr0, flow0, jac0, args.threshold, args.max_mag,
             )
             overlay1 = render_directional_overlay(
-                curr1, flow1, scale1, args.threshold, args.max_mag,
+                curr1, flow1, jac1, args.threshold, args.max_mag,
             )
 
             draw_overlay(overlay0, "cam0", frame_num, total_frames, args.threshold, args.max_mag)
             draw_overlay(overlay1, "cam1", frame_num, total_frames, args.threshold, args.max_mag)
-            draw_direction_legend(overlay0)
-            draw_direction_legend(overlay1)
+            draw_axis_legend(overlay0, axes_screen0[0], axes_screen0[1])
+            draw_axis_legend(overlay1, axes_screen1[0], axes_screen1[1])
 
             combined = np.hstack([overlay0, overlay1])
             cv2.imshow("Dense Optical Flow Explorer (metric)", combined)
