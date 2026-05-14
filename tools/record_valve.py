@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import math
 import subprocess
 import sys
 import threading
@@ -51,6 +52,32 @@ except ImportError:
 
 
 MJPG_QUALITY = 2  # ffmpeg -q:v scale: 1=best, 31=worst; 2 is visually lossless
+
+# Reference exposure/gain anchored at 30 fps in src/core/basler_camera.py.
+# At higher fps the frame period shrinks below 25 ms so exposure must drop;
+# gain is bumped 6 dB per stop of lost exposure to keep image brightness flat.
+BASE_FPS = 30.0
+BASE_EXPOSURE_US = 25000.0       # 25 ms at 30 fps
+BASE_GAIN_DB = 18.0              # 18 dB at 30 fps
+EXPOSURE_DUTY = 0.75             # exposure / frame_period; matches 25 ms @ 30 fps
+MAX_GAIN_DB = 36.0               # a2A1920-160umBAS practical ceiling
+
+
+def _auto_exposure_gain(fps: float) -> tuple[int, float]:
+    """Scale exposure (us) and gain (dB) to the target frame rate.
+
+    Anchored on BASE_FPS / BASE_EXPOSURE_US / BASE_GAIN_DB so behavior at
+    30 fps matches the GUI exactly. Above 30 fps, exposure is clipped to
+    EXPOSURE_DUTY * frame_period and gain is increased by 6 dB per stop
+    of lost exposure (clamped at MAX_GAIN_DB). Below 30 fps both stay at
+    the baseline — no point overexposing or losing SNR.
+    """
+    frame_period_us = 1e6 / fps
+    exposure_us = min(BASE_EXPOSURE_US, EXPOSURE_DUTY * frame_period_us)
+    stops_lost = (math.log2(BASE_EXPOSURE_US / exposure_us)
+                  if exposure_us < BASE_EXPOSURE_US else 0.0)
+    gain_db = min(MAX_GAIN_DB, BASE_GAIN_DB + 6.0 * stops_lost)
+    return int(round(exposure_us)), gain_db
 
 
 def list_cameras() -> list[str]:
@@ -110,8 +137,11 @@ def _record_one(camera_index: int, duration_sec: float, fps: float,
     camera.Open()
     print(f"{tag}Connected: {devices[camera_index].GetFriendlyName()}")
 
+    exposure_us, gain_db = _auto_exposure_gain(fps)
+    print(f"{tag}Auto exposure/gain for {fps:g} fps: "
+          f"{exposure_us/1000:.2f} ms, {gain_db:.1f} dB")
     try:
-        camera.ExposureTime.SetValue(25000)  # 25ms
+        camera.ExposureTime.SetValue(exposure_us)
     except Exception as e:
         print(f"{tag}Warning: Could not set exposure: {e}")
     try:
@@ -120,7 +150,7 @@ def _record_one(camera_index: int, duration_sec: float, fps: float,
     except Exception as e:
         print(f"{tag}Warning: Could not set frame rate: {e}")
     try:
-        camera.Gain.SetValue(18)
+        camera.Gain.SetValue(gain_db)
     except Exception as e:
         print(f"{tag}Warning: Could not set gain: {e}")
 
