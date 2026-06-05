@@ -64,7 +64,7 @@ RHS Monitor is a PySide6 desktop application for the Right Heart Simulator — a
 | Arduino | 31250 baud, read-only, 7-field output |
 | Cameras | 2× Basler ace 2 a2A1920-160umBAS |
 | Resolution | 1920×1200, monochrome (sensor capable of 60 fps; recorded at 30 fps) |
-| Camera positions | 0° direct + 19.3° offset (as-built tilt 19.33° per CAD, 18.30° per calibration 2026-05-08; originally 30° in design but mounting compromised the angle). FIXED positions |
+| Camera positions | 0° direct + 19.3° offset (as-built tilt 19.33° per CAD). FIXED positions |
 | Camera lens | Edmund Optics #33-304, 16mm UC Series, C-mount, EPP=10.68 mm (from front vertex of first lens element, into lens). Same lens on both cameras. See `lens _specsheet.pdf` + `lens_drawing.pdf` |
 | Camera sync | Free-run (NOT hardware-triggered). Workaround for stereo: software timestamp matching via `grabResult.GetTimeStamp()`. Hardware sync via Basler GPIO pins is the eventual fix but deferred |
 | Recording format | MJPG in AVI container (visually lossless at ffmpeg `-q:v 2`), via piped ffmpeg subprocess. History: H.264/MP4 → FFV1 (2026-05-08) → MJPG (FFV1 too slow at ~26 fps; MJPG holds 30 fps, intra-only so no inter-frame artifacts) |
