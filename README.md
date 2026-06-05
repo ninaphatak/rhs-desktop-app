@@ -59,6 +59,30 @@ P1 P2 FLOW HR VT1 VT2 AT1
 | VT2 | Ventricle Temp 2 | C |
 | AT1 | Atrium Temp | C |
 
+## Computer Vision Pipeline (offline)
+
+The CV work is **offline** — a set of standalone scripts in `tools/`, separate
+from the live monitoring app. The deliverable is per-frame **metric (mm)
+leaflet displacement**, computed by triangulating manually-labeled anatomical
+landmarks across both calibrated cameras.
+
+The pipeline (run in order on recorded dual-camera video):
+
+1. `record_calibration.py` / `record_valve.py` — dual-camera capture
+2. `stereo_calibrate.py` — single-view stereo calibration per camera (per fluid)
+3. `annotate_stereo_point.py` — label the same landmark in both camera views
+4. `triangulate.py` → `analyze_metric.py` — per-frame XYZ in mm + cycle metrics
+
+A second **multi-point "tracks"** workstream (`track_intersections.py`,
+`pick_track_seeds.py`, `playback_tracks.py`, `analyze_tracks.py`) auto-tracks
+valve intersection corners over time using a hybrid LK + frame-0 NCC anchor
+that resists drift. See `docs/metric_displacement_mathematics.md` and
+`docs/calibration_to_displacement_walkthrough.md` for the math.
+
+```bash
+pytest tests/ -v          # run the test suite (includes CV tracking tests)
+```
+
 ## Project Structure
 
 ```
@@ -67,12 +91,24 @@ src/
   core/                # Business logic (serial reader, camera, data recorder, run logger)
   ui/                  # GUI widgets (main window, graphs, cameras, dialogs)
   utils/               # Config constants, port detection
+tools/                 # Offline CV pipeline (calibration, triangulation, tracking, plotting)
 tests/                 # pytest tests + mock hardware
-outputs/               # Recorded CSVs + run log (gitignored)
+outputs/               # Recorded CSVs, videos, calibration JSONs (gitignored)
 arduino/               # Arduino firmware
-docs/                  # Protocol specs
+docs/                  # PRD, design plans, CV math docs, handoff package
 legacy/                # Archived old code (serial_reader.py, plots, old src/)
 ```
+
+## Design Documentation
+
+This repository doubles as the project's Design History File. Key documents:
+
+- `docs/PRD.md` — product requirements and CV pipeline design
+- `docs/plans/` — feature design + implementation plans
+- `docs/handoff/` — onboarding/handoff package for a new maintainer (start at
+  `docs/handoff/00-START-HERE.md`)
+- `docs/metric_displacement_mathematics.md`,
+  `docs/calibration_to_displacement_walkthrough.md` — the CV math
 
 ## Team
 

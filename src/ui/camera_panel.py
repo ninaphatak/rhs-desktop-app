@@ -1,6 +1,7 @@
 """Dual camera feed panel — two QLabel frames side by side."""
 
 import logging
+from pathlib import Path
 
 import numpy as np
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSizePolicy
@@ -110,28 +111,37 @@ class CameraPanel(QWidget):
 
     @property
     def both_cameras_connected(self) -> bool:
-        """Return True if both cameras are connected and running."""
-        return (
-            self._left_camera is not None
-            and self._left_camera.is_connected
-            and self._right_camera is not None
-            and self._right_camera.is_connected
-        )
+        """True iff both Basler cameras are connected and ready to record."""
+        return (self._left_camera is not None and self._left_camera.is_connected
+                and self._right_camera is not None and self._right_camera.is_connected)
 
-    def start_recording(self, cam1_path: str, cam2_path: str) -> None:
-        """Start recording on both cameras.
+    def start_recording_single(self, camera_index: int, output_path: Path,
+                               duration_sec: float = 10.0, fps: float = 60.0) -> None:
+        """Start MJPG/AVI recording on a single camera (used by CLI auto-start path).
 
-        Args:
-            cam1_path: Output path for camera 1 (left) AVI.
-            cam2_path: Output path for camera 2 (right) AVI.
+        If the requested FPS exceeds the camera's current target_fps, the
+        camera frame rate is bumped to match so the AVI isn't under-sampled.
         """
+        cam = self._left_camera if camera_index == 0 else self._right_camera
+        if cam is None:
+            logger.error(f"Camera {camera_index} not connected — cannot record")
+            return
+        if fps > cam.target_fps:
+            cam.target_fps = fps
+            cam._configure()
+            logger.info(f"Camera {camera_index} FPS raised to {fps} for recording")
+        cam.start_recording(output_path, duration_sec, fps)
+
+    def start_recording_both(self, cam0_path: Path, cam1_path: Path,
+                             duration_sec: float = 600.0) -> None:
+        """Start synchronized MJPG/AVI recording on both cameras (UI Record button)."""
         if self._left_camera:
-            self._left_camera.start_recording(cam1_path)
+            self._left_camera.start_recording(cam0_path, duration_sec=duration_sec)
         if self._right_camera:
-            self._right_camera.start_recording(cam2_path)
+            self._right_camera.start_recording(cam1_path, duration_sec=duration_sec)
 
     def stop_recording(self) -> None:
-        """Stop recording on both cameras."""
+        """Stop recording on both cameras (UI Stop button)."""
         if self._left_camera:
             self._left_camera.stop_recording()
         if self._right_camera:

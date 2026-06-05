@@ -1,8 +1,12 @@
 """Main application window for RHS Monitor."""
 
 import logging
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
-from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
 from src.core.data_recorder import DataRecorder
 from src.core.serial_reader import SerialReader
@@ -17,7 +21,12 @@ logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     """Top-level window: graphs + cameras + control bar."""
 
-    def __init__(self, mock: bool = False, parent=None) -> None:
+    def __init__(self, mock: bool = False,
+                 record_camera: Optional[int] = None,
+                 record_duration: float = 10.0,
+                 record_fps: float = 60.0,
+                 record_output: Optional[str] = None,
+                 parent=None) -> None:
         super().__init__(parent)
         self._mock = mock
         self.setWindowTitle("RHS Monitor")
@@ -57,16 +66,27 @@ class MainWindow(QMainWindow):
         self._mock_arduino = None
         self._start_serial()
 
+        # -- Auto-start AVI recording if requested via CLI --
+        if record_camera is not None:
+            if record_output:
+                filename = (record_output if record_output.endswith(".avi")
+                            else record_output + ".avi")
+            else:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"valve_cam{record_camera}_{ts}.avi"
+            output_path = Path(__file__).resolve().parent.parent.parent / "outputs" / filename
+            self._camera_panel.start_recording_single(
+                record_camera, output_path, record_duration, record_fps)
+
     # ------------------------------------------------------------------
     # Recording
     # ------------------------------------------------------------------
 
     def _on_record(self) -> None:
-        """Start CSV recording, and optionally camera recording."""
+        """Start CSV recording, and prompt to also record cameras if both connected."""
         filename = self._data_recorder.start_recording()
         self._control_bar.set_recording(filename)
 
-        # Offer camera recording if both cameras are connected
         if self._camera_panel.both_cameras_connected:
             reply = QMessageBox.question(
                 self,
@@ -77,15 +97,16 @@ class MainWindow(QMainWindow):
             )
             if reply == QMessageBox.StandardButton.Yes:
                 VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-                # Extract timestamp from CSV filename: rhs_YYYY-MM-DD_HH-MM-SS.csv
-                timestamp = filename.replace("rhs_", "").replace(".csv", "")
-                cam1_path = str(VIDEOS_DIR / f"camera1_{timestamp}.avi")
-                cam2_path = str(VIDEOS_DIR / f"camera2_{timestamp}.avi")
-                self._camera_panel.start_recording(cam1_path, cam2_path)
-                self._control_bar.set_camera_recording(True)
+                # Pair camera filenames with the CSV's timestamp:
+                # rhs_YYYY-MM-DD_HH-MM-SS.csv -> camera{0,1}_<same>.avi
+                ts_part = filename.replace("rhs_", "").replace(".csv", "")
+                cam0_path = VIDEOS_DIR / f"camera0_{ts_part}.avi"
+                cam1_path = VIDEOS_DIR / f"camera1_{ts_part}.avi"
+                self._camera_panel.start_recording_both(cam0_path, cam1_path)
+                logger.info(f"Camera recording started: {cam0_path.name}, {cam1_path.name}")
 
     def _on_stop(self) -> None:
-        """Stop CSV recording and camera recording."""
+        """Stop CSV recording AND camera recording."""
         self._data_recorder.stop_recording()
         self._camera_panel.stop_recording()
         self._control_bar.set_stopped()
