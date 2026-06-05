@@ -25,7 +25,7 @@ pytest tests/ -v       # Run tests
 - `src/utils/` — Config constants, port detection
 - `tests/` — pytest tests + mock hardware + `cv_frames/` (static valve frames for CV dev)
 - `tools/` — Standalone CV scripts (not part of the main app): record_calibration, flow_explore, annotate_point, playback_annotations, analyze_annotations, stereo_calibrate, annotate_stereo_point, triangulate, analyze_metric
-- `docs/` — PRD.md, plans/, solenoid_protocol.md
+- `docs/` — PRD.md, plans/, handoff/, CV math docs
 - `markers.csv` — CAD-derived calibration object geometry (41 painted dots + cam0/cam1 reference positions); consumed by `tools/stereo_calibrate.py`
 - `lens _specsheet.pdf` + `lens_drawing.pdf` — Edmund Optics #33-304 16mm UC Series lens datasheet + mechanical drawing
 - `outputs/` — Recorded CSVs + run_log.csv (gitignored). Subdirs: `videos/` (FFV1/AVI camera recordings + calibration captures + per-frame timestamp + metadata sidecars), `calib/` (per-fluid stereo calibration JSONs + correspondence files)
