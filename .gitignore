@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.pyc
+*.pdf
 *.pyo
 *.egg-info/
 .pytest_cache/
