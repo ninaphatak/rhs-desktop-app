@@ -274,9 +274,8 @@ Arduino or cameras attached.
 
 ---
 
-## Design Documentation (DHF)
+## Design Documentation
 
-This repository doubles as the project's Design History File:
 
 - `docs/PRD.md` — product requirements + CV pipeline design + build-state table
 - `docs/plans/` — per-feature design + implementation plans
