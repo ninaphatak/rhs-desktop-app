@@ -41,39 +41,39 @@ Two subtleties worth internalizing before you touch this code:
 ### 1.4 ASCII architecture diagram
 
 ```
-                       ┌──────────────────────────── UI THREAD (Qt event loop) ────────────────────────────┐
-                       │                                                                                    │
-  ┌────────────┐       │   ┌──────────────┐   data_received(dict)    ┌─────────────────────────────────┐    │
-  │  Arduino   │  USB  │   │ SerialReader │ ───────────┬───────────► │ MainWindow._on_data_received    │    │
-  │ (7 fields) │──────►│   │  (QThread)   │            │             │   ├─► GraphPanel.update_data     │    │
-  └────────────┘ 31250 │   └──────────────┘            │             │   │     (deque×7, 20Hz refresh)  │    │
-                  baud  │      [--mock → MockArduino, same signals]   │   └─► DataRecorder.record_row    │───┐│
-                       │                                              └─────────────────────────────────┘   ││
-                       │                                                                                     ││ writes
+                       ┌──────────────────────────── UI THREAD (Qt event loop) ──────────────────────────────┐
+                       │                                                                                     │
+  ┌────────────┐       │   ┌──────────────┐   data_received(dict)     ┌──────────────────────────────────┐   │
+  │  Arduino   │  USB  │   │ SerialReader │ ───────────┬────────────► │ MainWindow._on_data_received     │   │
+  │ (7 fields) │──────►│   │  (QThread)   │            │              │   ├─► GraphPanel.update_data     │   │
+  └────────────┘ 31250 │   └──────────────┘            │              │   │     (deque×7, 20Hz refresh)  │   │
+                  baud │      [--mock → MockArduino, same signals]    │   └─► DataRecorder.record_row    │──┐│
+                       │                                              └──────────────────────────────────┘  ││
+                       │                                                                                    ││ writes
   ┌────────────┐       │   ┌──────────────┐  frame_ready(dict)        ┌─────────────────────────────────┐   ││ (UI thread)
   │ Basler cam0│──USB──┼──►│ BaslerCamera │ ──(throttled 5fps)──────► │ CameraPanel._update_left/right  │   ││
   └────────────┘       │   │  (QThread L) │                           │   (QLabel preview, scale-crop)  │   ││
   ┌────────────┐       │   ├──────────────┤                           └─────────────────────────────────┘   ││
-  │ Basler cam1│──USB──┼──►│ BaslerCamera │                                                                   ││
-  └────────────┘       │   │  (QThread R) │   recording_finished(str) ····► [DECLARED, NOT CONNECTED]         ││
-                       │   └──────┬───────┘                                                                   ││
-                       │          │ _write_frame() — ALL 30 fps, under _writer_lock                           ││
-                       │          ▼ (grab thread, NOT UI thread)                                              ││
-                       │   ┌──────────────┐         ┌─────────────┐  plot_clicked / log_clicked              ││
-                       │   │ piped ffmpeg │         │  ControlBar │ ──────────┬──────────────────────────────┘│
-                       │   │ MJPG/AVI -q2 │         │ Rec/Stop/   │           │  (lazy import + .exec())        │
-                       │   └──────┬───────┘         │ Plot/Log    │           ▼                                 │
-                       └──────────┼─────────────────┴─────────────┴── PlotDialog / LogDialog (modal QDialog) ──┘
+  │ Basler cam1│──USB──┼──►│ BaslerCamera │                                                                 ││
+  └────────────┘       │   │  (QThread R) │   recording_finished(str) ····► [DECLARED, NOT CONNECTED]       ││
+                       │   └──────┬───────┘                                                                 ││
+                       │          │ _write_frame() — ALL 30 fps, under _writer_lock                         ││
+                       │          ▼ (grab thread, NOT UI thread)                                            ││
+                       │   ┌──────────────┐         ┌─────────────┐  plot_clicked / log_clicked             ││
+                       │   │ piped ffmpeg │         │  ControlBar │ ──────────┬─────────────────────────────┘│
+                       │   │ MJPG/AVI -q2 │         │ Rec/Stop/   │           │  (lazy import + .exec())     │
+                       │   └──────┬───────┘         │ Plot/Log    │           ▼                              │
+                       └──────────┼─────────────────┴─────────────┴─ PlotDialog / LogDialog (modal QDialog) ─┘
                                   │                                          ▲  ◄── REUSE TEMPLATE for analysis
                                   ▼                                          │
-                ╔═════════════════════════════════════════════════════════╗ │ reads
-                ║                   ON-DISK DATA SURFACE                    ║─┘
+                ╔═══════════════════════════════════════════════════════════╗│ reads
+                ║                   ON-DISK DATA SURFACE                    ║┘
                 ║  outputs/rhs_<ts>.csv                  (sensors)          ║
-                ║  outputs/run_log.csv                   (run quality)      ║      ┌──────────────────────────┐
+                ║  outputs/run_log.csv                   (run quality)      ║      ┌───────────────────────────┐
                 ║  outputs/videos/cameraN_<ts>.avi       (MJPG video)       ║─────►│   OFFLINE tools/ pipeline │
                 ║  outputs/videos/...avi.timestamps.csv  (free-run sync)    ║      │  (separate processes,     │
                 ║  outputs/videos/...avi.metadata.json   (fps/serial/dims)  ║      │   no live GUI today)      │
-                ║  outputs/calib/stereo_calib_<fluid>.json (calibration)    ║      └──────────────────────────┘
+                ║  outputs/calib/stereo_calib_<fluid>.json (calibration)    ║      └───────────────────────────┘
                 ╚═══════════════════════════════════════════════════════════╝
 ```
 
