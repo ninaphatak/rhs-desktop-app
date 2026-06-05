@@ -1,6 +1,14 @@
 # Git Branch Report — RHS Monitor (Handoff)
 
-> **Audience:** the maintainer, Dr. Lee (sponsor), and incoming students.
+> **⚠️ STATUS UPDATE (2026-06-05):** Much of the analysis below is now a *pre-merge
+> snapshot*. Since this was written: **`feature/flow-export` has been merged into `main`**,
+> so `main` now carries the complete project (full CV/stereo pipeline + dual-camera
+> recording). The **"tracks" workstream is now committed** (no longer untracked), the
+> outdated `docs/solenoid_protocol.md` was removed, and the recording codec is documented
+> correctly as **MJPG/AVI** (not FFV1). `feature/flow-export` is therefore now also fully
+> merged and safe to delete. Treat the branch table below as historical context.
+>
+> **Audience:** the maintainer, Dr. Lee (sponsor), and incoming researchers.
 > **Generated:** 2026-05-30, read-only via `git log` / `git rev-list` / `git merge-base`.
 > **All ahead/behind counts are relative to `main`** (`git rev-list --count main..<branch>` for ahead, `<branch>..main` for behind). Dates are last-commit author dates.
 

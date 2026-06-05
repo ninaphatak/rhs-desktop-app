@@ -1,5 +1,7 @@
 # RHS Monitor — Handoff Readiness & Documentation-Drift Report
-> Auto-generated from a multi-agent codebase audit on 2026-05-30. This is the **pre-handoff checklist**: it lists everywhere the committed docs (CLAUDE.md / PRD) have drifted from the actual code, plus a prioritized cleanup list. Fix P0+P1 before students arrive.
+> Auto-generated from a multi-agent codebase audit on 2026-05-30. This is the **pre-handoff checklist**: it lists everywhere the committed docs (CLAUDE.md / PRD) have drifted from the actual code, plus a prioritized cleanup list.
+>
+> **⚠️ STATUS UPDATE (2026-06-05) — several items below are now RESOLVED:** the **"tracks" workstream is committed** (no longer untracked); **`feature/flow-export` is merged into `main`** (complete project on one branch); the **lens drift is fixed** in CLAUDE.md/PRD (#33-304 / EPP 10.68 mm); the **recording codec is corrected to MJPG/AVI** (not FFV1) in CLAUDE.md/PRD/README; and **`docs/solenoid_protocol.md` was removed** (the disabled "Start RHS" button was already gone on `main`). Remaining drift items (e.g. `tests/cv_frames/`, the `flow-export` branch-name misnomer) are still open. Treat findings below as the audit baseline.
 
 ## Unified project map (as the code actually is today)
 ## RHS Monitor — Project Map (as it ACTUALLY is, 2026-05-30)

@@ -8,7 +8,7 @@ Unified GUI for: Arduino sensor monitoring (P1, P2, Flow, HR, VT1, VT2, AT1), on
 > See `docs/PRD.md` for product requirements and `docs/plans/2026-05-08-stereo-calibration-design.md` for the active CV workstream.
 
 ## Tech Stack
-Python 3.11+ | PySide6 + pyqtgraph | pypylon (Basler camera) | OpenCV (optical flow + stereo calibration + triangulation) | imageio-ffmpeg (FFV1/AVI recording) | pyserial (31250 baud, read-only) | pandas/numpy | matplotlib (in-app dialogs + offline plots) | pytest
+Python 3.11+ | PySide6 + pyqtgraph | pypylon (Basler camera) | OpenCV (optical flow + stereo calibration + triangulation) | imageio-ffmpeg (MJPG/AVI recording) | pyserial (31250 baud, read-only) | pandas/numpy | matplotlib (in-app dialogs + offline plots) | pytest
 
 ## How to Run
 ```bash
@@ -28,7 +28,7 @@ pytest tests/ -v       # Run tests
 - `docs/` — PRD.md, plans/, handoff/, CV math docs
 - `markers.csv` — CAD-derived calibration object geometry (41 painted dots + cam0/cam1 reference positions); consumed by `tools/stereo_calibrate.py`
 - `lens _specsheet.pdf` + `lens_drawing.pdf` — Edmund Optics #33-304 16mm UC Series lens datasheet + mechanical drawing
-- `outputs/` — Recorded CSVs + run_log.csv (gitignored). Subdirs: `videos/` (FFV1/AVI camera recordings + calibration captures + per-frame timestamp + metadata sidecars), `calib/` (per-fluid stereo calibration JSONs + correspondence files)
+- `outputs/` — Recorded CSVs + run_log.csv (gitignored). Subdirs: `videos/` (MJPG/AVI camera recordings + calibration captures + per-frame timestamp + metadata sidecars), `calib/` (per-fluid stereo calibration JSONs + correspondence files)
 - `arduino/` — Arduino firmware (rhs_firmware.ino)
 - `legacy/` — Archived old code
 
@@ -57,7 +57,7 @@ pytest tests/ -v       # Run tests
 - Camera lens: **Edmund Optics #33-304, 16mm UC Series, C-mount**. Same lens on both cameras. EPP = 10.68 mm from front vertex of first lens element, positive into lens (per `lens _specsheet.pdf` + `lens_drawing.pdf`). (Earlier reference to #59-870 C-Series was an incorrect lens link)
 - Camera sync: **NOT hardware-triggered** — both cameras free-run independently. For stereo analysis use **software timestamp matching** via `grabResult.GetTimeStamp()`. Hardware sync via Basler GPIO is the eventual fix but deferred
 - Camera positions: 0° direct view + **19.3° offset** (the as-built optical axis tilt is 19.33° from vertical per CAD, recovered as 18.30° from calibration on 2026-05-08; originally designed for 30° but mounting compromised the angle). Both positions are fixed — valve appears at the same pixel location every session
-- Recording format: **lossless FFV1 in AVI container** (was H.264/MP4 — reverted 2026-05-08 to remove inter-frame compression artifacts that bias optical flow). ~30-50 MB/sec mono at 30 fps. Threading model + lock pattern preserved from MP4 implementation
+- Recording format: **MJPG in AVI container** (visually lossless at ffmpeg `-q:v 2`), written via a piped ffmpeg subprocess. History: H.264/MP4 → reverted to FFV1 (2026-05-08, to drop inter-frame compression that biases optical flow) → switched to MJPG (FFV1 was ~38 ms/frame, only ~26 fps with jitter; MJPG encodes in ~3-5 ms/frame and holds 30 fps). Intra-only, so no inter-frame artifacts. Threading model + lock pattern preserved across all three
 - Valve: white silicone tricuspid valve, 3 leaflets, operates underwater, leaflets bow outward toward camera when open
 - Working fluids (both in scope): water (n≈1.333) and 35% glycerin blood analog with 0.02% xanthan gum (n≈1.385). Separate stereo calibration per fluid
 - Visual conditions: bubbles on leaflet surface, uneven underwater lighting, dark triangular orifice when open
@@ -114,8 +114,9 @@ multiple z-depths (non-coplanar).
 `grabResult.GetTimeStamp()`. Hardware GPIO sync is the eventual fix
 but deferred.
 
-**Lens:** Edmund Optics #59-870, 16mm C-Series, C-mount. Same lens
-both cameras. EPP=24.42 mm per spec sheet.
+**Lens:** Edmund Optics #33-304, 16mm UC Series, C-mount. Same lens
+both cameras. EPP=10.68 mm per spec sheet. (An earlier reference to
+#59-870 C-Series / EPP 24.42 mm was an incorrect lens link.)
 
 **Pipeline (offline, in `tools/`, all built 2026-05-08):**
 1. `record_calibration.py` — dual-camera AVI capture of submerged

@@ -67,7 +67,7 @@ RHS Monitor is a PySide6 desktop application for the Right Heart Simulator — a
 | Camera positions | 0° direct + 19.3° offset (as-built tilt 19.33° per CAD, 18.30° per calibration 2026-05-08; originally 30° in design but mounting compromised the angle). FIXED positions |
 | Camera lens | Edmund Optics #33-304, 16mm UC Series, C-mount, EPP=10.68 mm (from front vertex of first lens element, into lens). Same lens on both cameras. See `lens _specsheet.pdf` + `lens_drawing.pdf` |
 | Camera sync | Free-run (NOT hardware-triggered). Workaround for stereo: software timestamp matching via `grabResult.GetTimeStamp()`. Hardware sync via Basler GPIO pins is the eventual fix but deferred |
-| Recording format | Lossless FFV1 in AVI container (was H.264/MP4 — reverted 2026-05-08 to remove inter-frame compression artifacts that bias optical flow analysis) |
+| Recording format | MJPG in AVI container (visually lossless at ffmpeg `-q:v 2`), via piped ffmpeg subprocess. History: H.264/MP4 → FFV1 (2026-05-08) → MJPG (FFV1 too slow at ~26 fps; MJPG holds 30 fps, intra-only so no inter-frame artifacts) |
 | Valve | White silicone tricuspid, 3 leaflets, underwater |
 | Valve behavior | Leaflets bow outward (toward camera) when open |
 | Visual conditions | Bubbles on surface, uneven underwater lighting |
@@ -297,7 +297,7 @@ The RHS does not meet the FDA Section 201(h) medical device definition — it is
 | Annotation playback | ✅ Done | `tools/playback_annotations.py` — overlay + arrow + trail; per-frame length readout in HUD; `--save` renders MP4; `--plot` saves displacement-vs-time figure to `outputs/`; auto-loops between first/last annotated frame |
 | Cycle CV analyzer (Mode A) | ✅ Done | `tools/analyze_annotations.py` — cycle detection from phase labels, per-cycle period + peak displacement, CV across cycles (pixel mode) |
 | Flow vs manual error (Mode B) | ✅ Done | `tools/analyze_annotations.py --video` — Farneback dense flow at annotated points, median + p95 error vs manual displacement (pixel mode) |
-| Lossless FFV1/AVI recording | ✅ Done | `src/core/basler_camera.py` + `src/ui/main_window.py` — reverted from H.264/MP4 to lossless intra-only FFV1 in AVI container; threading model + lock pattern preserved |
+| MJPG/AVI recording | ✅ Done | `src/core/basler_camera.py` + `src/ui/main_window.py` — intra-only MJPG in AVI container (visually lossless at `-q:v 2`) via piped ffmpeg subprocess; superseded the earlier FFV1 attempt (too slow); threading model + lock pattern preserved |
 | Standalone calibration capture | ✅ Done | `tools/record_calibration.py` — dual-camera capture without GUI; CLI: `python tools/record_calibration.py <fluid_label> [--duration N]`; outputs `calib_<label>_<ts>_camN.avi` |
 | Stereo calibration tool | ✅ Done | `tools/stereo_calibrate.py` — single-view calibration per camera with manual dot-ID assignment, interactive editor (`--edit`), load/save correspondences (`--load`) for resumability, k1+tangential distortion model with fixed focal length and principal point, full validation report (reprojection RMS + 3D triangulation error vs CAD + camera-position cross-check) |
 | First water calibration validated | ✅ Done | `outputs/calib/stereo_calib_water.json` — 0.154mm median 3D error, 0.431mm max, EPP discrepancies <11mm, cam1 tilt agrees with CAD to within 1° (18.30° vs 19.33°) |
