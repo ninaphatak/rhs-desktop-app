@@ -47,11 +47,13 @@ pytest tests/ -v      # run the test suite
 
 On Windows use `setup.bat` / `run.bat`.
 
+> **Need conda first?** Install [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) (lightweight, recommended) or full [Anaconda](https://www.anaconda.com/download) — `setup.sh` / `run.sh` use it to build and activate the `rhs-app` environment.
+
 ---
 
 ## Prerequisites
 
-1. **Conda** — [Miniconda](https://docs.anaconda.com/miniconda/) or Anaconda.
+1. **Conda** — [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) or [Anaconda](https://www.anaconda.com/download).
 2. **Basler Pylon SDK** — from [baslerweb.com](https://www.baslerweb.com/). Required only
    for live camera feeds; the GUI runs without it in `--mock` mode, and the offline CV
    tools run on already-recorded video.
