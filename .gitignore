@@ -64,3 +64,7 @@ dist/
 
 # Legacy pycache (in archived code)
 legacy/**/__pycache__/
+docs/_maintainer/
+CLAUDE.md
+legacy/
+.claudeignore

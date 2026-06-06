@@ -32,7 +32,6 @@ underwater while a solenoid pumps fluid through it. This repository contains two
 - [Serial Data Format](#serial-data-format)
 - [Arduino Firmware](#arduino-firmware)
 - [Testing](#testing)
-- [Design Documentation (DHF)](#design-documentation-dhf)
 - [Team](#team)
 
 ---
@@ -167,10 +166,6 @@ python tools/plot_calibration_geometry_3d.py                              # 3D v
 python tools/flow_explore.py CAM0.avi CAM1.avi                            # dense optical-flow visualizer
 ```
 
-The math behind all of this is written up in
-`docs/metric_displacement_mathematics.md` and
-`docs/calibration_to_displacement_walkthrough.md`.
-
 ---
 
 ## Codebase Structure
@@ -213,10 +208,8 @@ tools/                       # Offline CV pipeline (standalone CLI scripts — N
 
 tests/                       # pytest suite + mock hardware (mock_arduino.py, mock_camera.py)
 arduino/                     # Arduino firmware — reference copy only (see below)
-docs/                        # PRD, design plans, CV math docs, handoff package
 markers.csv                  # CAD-derived calibration-object geometry (consumed by stereo_calibrate.py)
 outputs/                     # Recordings, videos, calibration JSONs, run log (gitignored)
-legacy/                      # Archived old code (kept for design history)
 ```
 
 ## Which files you actually interact with
@@ -271,18 +264,6 @@ pytest tests/ -v
 Tests use mock hardware (`tests/mock_arduino.py`, `tests/mock_camera.py`) and a recorded
 `tests/mock_data.csv`, so the full suite — including the CV tracking tests — runs with no
 Arduino or cameras attached.
-
----
-
-## Design Documentation
-
-
-- `docs/PRD.md` — product requirements + CV pipeline design + build-state table
-- `docs/plans/` — per-feature design + implementation plans
-- `docs/handoff/` — onboarding/handoff package for a new maintainer
-  (**start at `docs/handoff/00-START-HERE.md`**)
-- `docs/metric_displacement_mathematics.md`,
-  `docs/calibration_to_displacement_walkthrough.md` — the CV math, derived in full
 
 ---
 
