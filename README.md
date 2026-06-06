@@ -36,21 +36,6 @@ underwater while a solenoid pumps fluid through it. This repository contains two
 
 ---
 
-## Quick Start
-
-```bash
-bash setup.sh         # one-time: create the rhs-app conda environment
-bash run.sh           # launch the GUI (needs Arduino + cameras)
-bash run.sh --mock    # launch the GUI on recorded mock data (NO hardware needed)
-pytest tests/ -v      # run the test suite
-```
-
-On Windows use `setup.bat` / `run.bat`.
-
-> **Need conda first?** Install [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) (lightweight, recommended) or full [Anaconda](https://www.anaconda.com/download) — `setup.sh` / `run.sh` use it to build and activate the `rhs-app` environment.
-
----
-
 ## Prerequisites
 
 1. **Conda** — [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) or [Anaconda](https://www.anaconda.com/download).
@@ -63,6 +48,21 @@ On Windows use `setup.bat` / `run.bat`.
 `setup.sh` builds a conda env named **`rhs-app`** from `environment.yml`. `run.sh`
 activates it for you, so you do not need to `conda activate` manually. If `environment.yml`
 changes, re-run `setup.sh` (it re-validates a hash and will tell you when this is needed).
+
+---
+
+## Quick Start
+
+```bash
+bash setup.sh         # ONE-TIME: create the rhs-app conda environment
+bash run.sh           # launch the GUI (needs Arduino + cameras)
+bash run.sh --mock    # launch the GUI on recorded mock data (NO hardware needed)
+pytest tests/ -v      # run the test suite
+```
+
+On Windows use `setup.bat` / `run.bat`.
+
+> **Need conda first?** Install [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) (lightweight, recommended) or full [Anaconda](https://www.anaconda.com/download) — `setup.sh` / `run.sh` use it to build and activate the `rhs-app` environment.
 
 ---
 
